@@ -89,5 +89,6 @@ un souci se consigne, il ne provoque pas d'effondrement.
 > la maintenance, et un procès-verbal par question pour comprendre chaque
 > réponse. »
 
-*(Phase E : Langfuse ajoutera la version « tableau de bord visuel » de tout
-ceci — arbre des décisions, tokens consommés et latence par agent.)*
+*(Depuis la Phase E, Langfuse offre la version « tableau de bord visuel » de
+tout ceci sur `http://localhost:3000` : arbre des décisions, tokens consommés
+et latence par agent, regroupés par conversation.)*
