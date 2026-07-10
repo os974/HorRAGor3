@@ -55,3 +55,15 @@ extend-select = ["I", "T201"]
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 testpaths = ["tests"]
+# La racine du projet doit être importable (imports `src.*`, projet non packagé).
+pythonpath = ["."]
+
+[tool.coverage.run]
+source = ["src"]
+# L'UI Streamlit sera testée en Phase G (st.testing.AppTest) ; hors mesure d'ici là.
+omit = ["app_frontend.py"]
+
+[tool.coverage.report]
+# Exigence de l'épilogue MLOps du brief : couverture minimale de 80 %.
+fail_under = 80
+show_missing = true

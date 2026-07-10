@@ -304,4 +304,33 @@ question devient une **trace** consultable sur `http://localhost:3000`.
 
 ---
 
-*Chapitres suivants : tests + CI (F), épilogue MLOps (G).*
+## Chapitre 5 — Les tests et la CI (Phase F)
+
+Les tests ne sont pas une étape du flux : ils sont le **filet de sécurité**
+sous chaque étape. 83 tests, ~92 % de couverture, exécution < 1 s.
+
+- **Hermétiques par construction** : aucun test n'a besoin d'Ollama, de
+  Supabase, du réseau ni de l'index FAISS. C'est le dividende des choix
+  d'architecture : routeurs purs (states forgés à la main), nœuds testés avec
+  un `FakeLLM` (monkeypatch des fabriques), graphe compilé avec des **nœuds
+  injectés** (`build_graph(rag=faux_rag, ...)` — le routage réel se vérifie
+  sans un seul appel IA), API testée avec un `FakeEngine` derrière
+  l'abstraction `AgentEngine`, repository sur une SQLite en mémoire au même
+  schéma, httpx/ddgs doublés.
+- **Ce que les tests verrouillent** : les deux chemins du graphe (lore
+  suffisant → narration directe ; insuffisant → détour Enquêteur), le
+  jugement déterministe (`harvest_facts`, `wants_web_details` — dont le cas
+  « anecdotes d'un film connu → Enquêteur quand même »), le contrat
+  « jamais d'exception » des outils (Ollama éteint, TMDB en panne, réseau
+  coupé), le « jamais de 500 » du moteur (récursion, panne → repli gothique),
+  le context trimming (la plume ne reçoit que system + dossier), et le
+  garde-fou de dimension des embeddings.
+- **CI** (`.github/workflows/ci.yml`) : à chaque push/PR sur main — ruff
+  check + format, puis pytest avec `fail_under = 80` (l'exigence du brief est
+  un verrou de build, pas une intention).
+- L'UI Streamlit (`app_frontend.py`) est hors mesure pour l'instant : elle
+  sera testée en Phase G (`st.testing.v1.AppTest`) avec la conteneurisation.
+
+---
+
+*Chapitre suivant : épilogue MLOps (G).*

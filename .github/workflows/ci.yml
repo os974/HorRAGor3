@@ -1,0 +1,34 @@
+# CI HorRAGor3 : lint + format + tests avec couverture minimale 80 %
+# (exigence de l'épilogue MLOps du brief). Les tests sont hermétiques :
+# aucun besoin d'Ollama, de Supabase, de l'index FAISS ni du réseau.
+name: CI
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+
+jobs:
+  quality:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+
+      - name: Set up Python
+        run: uv python install 3.12
+
+      - name: Install dependencies
+        run: uv sync
+
+      - name: Lint (ruff)
+        run: uv run ruff check .
+
+      - name: Format (ruff)
+        run: uv run ruff format --check .
+
+      - name: Tests + couverture ≥ 80 % (pytest)
+        run: uv run pytest --cov=src -q

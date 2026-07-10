@@ -44,6 +44,15 @@ uv run streamlit run app_frontend.py
 
 Endpoints : `GET /health`, `GET /metrics` (Prometheus), `POST /chat`.
 
+## Tests
+
+```bash
+uv run pytest --cov=src    # 83 tests hermétiques (ni Ollama, ni réseau), verrou à 80 %
+uv run ruff check . && uv run ruff format --check .
+```
+
+La CI GitHub Actions rejoue exactement ces commandes à chaque push/PR sur `main`.
+
 ## État d'avancement
 
 - [x] Phase A — Socle (config, contracts, trace, logging Loguru, index FAISS)
@@ -51,5 +60,5 @@ Endpoints : `GET /health`, `GET /metrics` (Prometheus), `POST /chat`.
 - [x] Phase C — Graphe multi-agent (state multi-canaux, 3 nœuds, routeurs purs, pipeline compilé)
 - [x] Phase D — API FastAPI (/health, /metrics, /chat) + front Streamlit (parcours des agents)
 - [x] Phase E — Monitoring Langfuse (self-hosted Docker, CallbackHandler v3 fail-open, traces par session)
-- [ ] Phase F — Tests (≥ 80 %) + CI
+- [x] Phase F — Tests (83 tests hermétiques, 92 % de couverture) + CI GitHub Actions
 - [ ] Phase G — Épilogue MLOps (Docker, JWT, Prometheus/Grafana/Uptime Kuma, Sphinx)
