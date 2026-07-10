@@ -1,0 +1,15 @@
+# Python
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# Secrets — jamais commités
+.env
+
+# Artefacts locaux volumineux ou régénérables
+data/faiss_index/
+logs/
