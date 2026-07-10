@@ -16,6 +16,9 @@ Singletons injectables (``set_index`` / ``set_repository``) : l'API injecte
 les vrais au démarrage, les tests injectent des fakes.
 """
 
+import json
+
+from langchain_core.tools import tool
 from loguru import logger
 
 from src import trace
@@ -169,3 +172,77 @@ def find_similar_horror_movies(film_id: int, k: int = 5) -> list[FilmRef]:
         logger.warning("find_similar_horror_movies({}) en échec technique : {}", film_id, exc)
         trace.record("pgvector", "recommend_similar", f"id={film_id} → erreur technique")
         return []
+
+
+# --- Wrappers LangChain : ce que le LLM de l'Agent RAG voit et appelle ---------
+# Pattern "outils par titre" validé sur HorRAGor2 : chaque outil compose en
+# interne validate → id → requête, pour épargner au petit modèle la gestion
+# des identifiants. Les docstrings ci-dessous sont les descriptions lues par
+# le LLM pour choisir son outil. Retour = JSON compact avec un champ "found" :
+# c'est ce marqueur que le nœud RAG scrute pour juger sa récolte (déterministe).
+
+
+@tool
+def lookup_movie(title: str) -> str:
+    """Valide un titre de film d'horreur et renvoie son dossier complet.
+
+    À appeler EN PREMIER pour toute question sur un film : corrige le titre,
+    confirme que le film existe dans la base locale, et renvoie année, genres,
+    note, synopsis, réalisateur et casting.
+
+    Args:
+        title: Le titre du film tel que l'utilisateur l'a écrit.
+
+    Returns:
+        JSON ``{"found": true, ...métadonnées}`` ou ``{"found": false, "reason": ...}``.
+    """
+    ref = validate_film(title)
+    if ref is None:
+        return json.dumps(
+            {"found": False, "reason": f"'{title}' est inconnu de la base locale"},
+            ensure_ascii=False,
+        )
+    meta = query_movie_metadata(ref.id)
+    if meta is None:
+        return json.dumps(
+            {"found": False, "reason": f"métadonnées indisponibles pour '{ref.title}'"},
+            ensure_ascii=False,
+        )
+    payload = meta.model_dump(exclude={"id", "tmdb_id"})
+    return json.dumps({"found": True, **payload}, ensure_ascii=False)
+
+
+@tool
+def find_similar(title: str, k: int = 5) -> str:
+    """Recommande des films d'horreur semblables à un film donné.
+
+    À utiliser quand l'utilisateur demande des recommandations ou des films
+    « dans le même genre que » un titre.
+
+    Args:
+        title: Le film de référence.
+        k: Nombre de recommandations souhaitées.
+
+    Returns:
+        JSON ``{"found": true, "similar": [...]}`` ou ``{"found": false, "reason": ...}``.
+    """
+    ref = validate_film(title)
+    if ref is None:
+        return json.dumps(
+            {"found": False, "reason": f"'{title}' est inconnu de la base locale"},
+            ensure_ascii=False,
+        )
+    similar = find_similar_horror_movies(ref.id, k)
+    if not similar:
+        return json.dumps(
+            {"found": False, "reason": f"aucune recommandation disponible pour '{ref.title}'"},
+            ensure_ascii=False,
+        )
+    return json.dumps(
+        {"found": True, "reference": ref.title, "similar": [s.title for s in similar]},
+        ensure_ascii=False,
+    )
+
+
+# La liste que le nœud RAG attache à son LLM (bind_tools) et au ToolNode.
+RAG_TOOLS = [lookup_movie, find_similar]

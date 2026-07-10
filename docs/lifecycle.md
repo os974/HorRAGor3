@@ -19,18 +19,18 @@ app_frontend.py (Streamlit)                     [Phase D — à venir]
 src/main.py (FastAPI)                           [Phase D — à venir]
    │ ChatRequest → AgentEngine.run()
    ▼
-src/graph/pipeline.py (graphe compilé)          [Phase C — à venir]
-   │ State initial {messages: [question]}
+src/graph/pipeline.py (graphe compilé)
+   │ State initial {question}
    ▼
-rag_node ⇄ rag_tools (fouille locale)           [Phase C — à venir]
+rag_node ⇄ rag_tools (fouille locale)
    │ state.lore, state.is_complete
    ▼
-router: should_scrape_or_narrate                [Phase C — à venir]
+router: should_scrape_or_narrate
    │ "narration" si le lore suffit, sinon "scraper"
-   ├─────────────► scraper_node ⇄ scraper_tools [Phase C — à venir]
+   ├─────────────► scraper_node ⇄ scraper_tools
    │                  │ state.web_findings
    ▼                  ▼
-narration_node (plume gothique, sans outils)    [Phase C — à venir]
+narration_node (plume gothique, sans outils)
    │ state.story
    ▼
 ChatResponse {answer, sources, path, trace} → Front → Utilisateur
@@ -153,5 +153,64 @@ la suite (ex. récolte locale vide → Scraper).
 
 ---
 
-*Chapitres suivants (au fil des phases) : graphe multi-agent (C), API et
-Front (D), monitoring Langfuse (E).*
+## Chapitre 2 — Le graphe multi-agent (Phase C)
+
+Le cœur du brief : trois agents en chaîne directe, sans manager central.
+Une requête y entre comme une `question` et en ressort comme une `story`.
+
+### `src/models/state.py` — le cahier des charges commun
+- **Entrées** : les écritures de chaque nœud (dicts fusionnés par LangGraph).
+- **Sorties** : la mémoire commune typée (`AgentState`).
+- **Ce qui s'y passe** : choix structurant — **un canal de messages PAR agent**
+  (`rag_messages`, `scraper_messages`) au lieu d'un historique unique. C'est
+  l'isolation de contexte du brief : chaque agent ne voit que sa propre
+  micro-conversation, la Narration ne voit aucun message. Les autres cases du
+  dossier : `lore` (faits locaux), `is_complete` (jugement du RAG),
+  `web_findings` (faits web), `story` (récit final), `path` (nœuds traversés,
+  reducer `operator.add`).
+
+### `src/graph/nodes.py` — les Ouvriers (la logique métier)
+- **Entrées** : `state` (paramètre unique, règle d'or du brief).
+- **Sorties** : un dict de modifications à fusionner — jamais d'effet de bord.
+- **Ce qui s'y passe** : les trois personnalités vivent ici (prompts
+  SystemMessage). `rag_node` (température 0, outils `RAG_TOOLS`) fouille en
+  micro-boucle puis **juge sa récolte de façon déterministe** : `is_complete`
+  = au moins un outil a marqué `"found": true` — aucun LLM dans la décision
+  de routage. `scraper_node` reçoit un brief reformulé (question + lore),
+  jamais l'historique du Chercheur (anti-collision de tokens). Il fige ses
+  `web_findings` (faits bruts du web). `narration_node` (température 0.7,
+  AUCUN outil) reçoit un dossier synthétique — question + lore + web_findings
+  — et rien d'autre : l'Écrivain Gothique n'a jamais vu un log technique.
+  Les nœuds ignorent qui précède et qui suit.
+
+### `src/graph/router.py` — les Aiguilleurs (la logique décisionnelle)
+- **Entrées** : `state` (lecture seule).
+- **Sorties** : un `str` — la prochaine destination, rien d'autre.
+- **Ce qui s'y passe** : `should_scrape_or_narrate` (le carrefour stratégique
+  du brief) lit `is_complete` : true → "narration", false → "scraper" (et
+  prudence par défaut : state vide → "scraper"). `should_continue_rag` et
+  `should_continue_scraper` gèrent les micro-boucles outil (`tool_calls`
+  présents → nœud outil). Fonctions pures : testées avec des states forgés,
+  sans lancer le pipeline ni le moindre LLM.
+
+### `src/graph/pipeline.py` — l'Ingénieur Système (le câblage)
+- **Entrées** : nœuds + routeurs (injectables pour les tests).
+- **Sorties** : `app = workflow.compile()` — le livrable importé par FastAPI.
+- **Ce qui s'y passe** : le point de vérité de la topologie, via les trois
+  méthodes du brief : `add_node` (5 nœuds : rag, rag_tools, scraper,
+  scraper_tools, narration), `add_edge` (START→rag ; micro-boucles
+  outil→agent ; narration→END), `add_conditional_edges` (les aiguilleurs aux
+  deux carrefours). Chaque `ToolNode` est branché sur le canal de messages de
+  SON agent (`messages_key`) : l'isolation tient jusque dans l'exécution des
+  outils.
+
+**Vu en conditions réelles** (qwen2.5:7b local) : « Parle-moi du film
+Hereditary » → `[rag, narration]` en ~18 s ; « anecdotes du film 'Heriditary' »
+(faute de frappe) → lookup sous le seuil FAISS → `[rag, scraper, narration]`
+en ~26 s, l'Enquêteur rapportant les anecdotes réelles (ScreenRant/IMDb) que
+la plume gothique romance sans inventer.
+
+---
+
+*Chapitres suivants (au fil des phases) : API et Front (D), monitoring
+Langfuse (E).*

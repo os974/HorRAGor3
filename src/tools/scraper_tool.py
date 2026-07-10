@@ -13,8 +13,11 @@ Même contrat que ``rag_tool`` : **jamais d'exception** — erreur réseau →
 message explicite ou liste vide, l'agent décide de la suite.
 """
 
+import json
+
 import httpx
 from ddgs import DDGS
+from langchain_core.tools import tool
 from loguru import logger
 
 from src import trace
@@ -95,3 +98,60 @@ def search_web(query: str, max_results: int = 5) -> list[dict]:
     ]
     trace.record("ddg", "search_web", f"{query!r} → {len(results)} résultat(s)")
     return results
+
+
+# --- Wrappers LangChain : ce que le LLM de l'Agent Scraper voit et appelle -----
+# Retour = JSON compact avec un champ "found", même marqueur que rag_tool :
+# le nœud Scraper scrute ce champ pour constituer ses web_findings.
+
+# Préfixes des messages d'erreur de scrape_detailed_synopsis : servent à
+# distinguer un vrai extrait d'un échec (contrat "jamais d'exception").
+_WIKI_FAILURE_PREFIXES = (
+    "Impossible de contacter Wikipédia",
+    "Aucune page Wikipédia",
+    "La page Wikipédia de",
+)
+
+
+@tool
+def wikipedia_synopsis(title: str) -> str:
+    """Récupère le résumé encyclopédique Wikipédia d'une œuvre d'horreur.
+
+    À utiliser pour obtenir le synopsis détaillé et le contexte d'un film
+    absent (ou incomplet) dans la base locale. Titres anglais recommandés,
+    ajouter « (film) » en cas d'ambiguïté.
+
+    Args:
+        title: Titre de l'œuvre, ex. "Hereditary (film)".
+
+    Returns:
+        JSON ``{"found": true, "synopsis": ...}`` ou ``{"found": false, "reason": ...}``.
+    """
+    text = scrape_detailed_synopsis(title)
+    failed = text.startswith(_WIKI_FAILURE_PREFIXES) or "page d'homonymie" in text
+    if failed:
+        return json.dumps({"found": False, "reason": text}, ensure_ascii=False)
+    return json.dumps({"found": True, "synopsis": text}, ensure_ascii=False)
+
+
+@tool
+def web_search(query: str) -> str:
+    """Cherche sur le web anecdotes, secrets de tournage et détails d'un film.
+
+    À utiliser pour creuser ce que Wikipédia ne donne pas : trivia, réception,
+    coulisses. Formuler la requête en anglais avec le titre et l'année,
+    ex. "Hereditary 2018 behind the scenes trivia".
+
+    Args:
+        query: La requête de recherche.
+
+    Returns:
+        JSON ``{"found": true, "results": [{title, url, snippet}]}`` ou
+        ``{"found": false}``.
+    """
+    results = search_web(query, max_results=5)
+    return json.dumps({"found": bool(results), "results": results}, ensure_ascii=False)
+
+
+# La liste que le nœud Scraper attache à son LLM (bind_tools) et au ToolNode.
+SCRAPER_TOOLS = [wikipedia_synopsis, web_search]
