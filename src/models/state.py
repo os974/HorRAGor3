@@ -33,7 +33,9 @@ class AgentState(TypedDict, total=False):
         lore: Synthèse factuelle de la récolte locale (contenus bruts des
             outils FAISS/SQL/pgvector ayant trouvé des données).
         is_complete: Jugement du nœud RAG sur sa récolte (déterministe :
-            au moins un outil a marqué ``"found": true``). Lu par le routeur
+            au moins un outil a marqué ``"found": true`` ET la question ne
+            réclame pas d'infos hors du périmètre local — anecdotes,
+            coulisses... cf. ``nodes.wants_web_details``). Lu par le routeur
             ``should_scrape_or_narrate`` — « le nœud juge, le routeur aiguille ».
         web_findings: Synthèse factuelle de l'enquête web (Scraper).
         story: La réponse finale de l'Écrivain Gothique.

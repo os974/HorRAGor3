@@ -17,6 +17,7 @@ from langgraph.errors import GraphRecursionError
 from loguru import logger
 
 from src import trace
+from src.config import settings
 from src.contracts.interfaces import AgentEngine
 from src.contracts.schemas import ChatRequest, ChatResponse
 from src.graph import pipeline
@@ -86,17 +87,23 @@ class GraphEngine:
     def _invoke_config(req: ChatRequest) -> dict:
         """Construit la config d'invocation du graphe.
 
-        Point d'ancrage du monitoring : la Phase E y ajoutera le
-        ``CallbackHandler`` Langfuse (``config={"callbacks": [...]}``),
-        corrélé au ``session_id`` de la requête.
+        Monitoring Langfuse (Phase E) : si les clés sont configurées, le
+        ``CallbackHandler`` est passé via ``config={"callbacks": [...]}``
+        (le mécanisme exact du brief) et le ``session_id`` de la requête est
+        transmis pour regrouper les traces par conversation dans l'UI.
 
         Args:
             req: La requête courante.
 
         Returns:
-            La config LangGraph (limite de récursion, callbacks à venir).
+            La config LangGraph (limite de récursion + callbacks éventuels).
         """
-        return {"recursion_limit": RECURSION_LIMIT}
+        config: dict = {"recursion_limit": RECURSION_LIMIT}
+        callbacks = _langfuse_callbacks()
+        if callbacks:
+            config["callbacks"] = list(callbacks)
+            config["metadata"] = {"langfuse_session_id": req.session_id}
+        return config
 
     @staticmethod
     def _sources_from(events) -> list[str]:
@@ -113,6 +120,40 @@ class GraphEngine:
             if step.kind in _SOURCE_KINDS and step.name not in seen:
                 seen.append(step.name)
         return seen
+
+
+@lru_cache(maxsize=1)
+def _langfuse_callbacks() -> tuple:
+    """Construit le CallbackHandler Langfuse une seule fois (fail-open).
+
+    Règle observabilité du projet : l'application fonctionne à l'identique
+    sans Langfuse — clés absentes ou serveur éteint → tuple vide, zéro bruit
+    dans le run. SDK v3 : l'import vit dans ``langfuse.langchain`` (le snippet
+    v2 du brief n'est plus valide) et les clés sont passées au client
+    explicitement depuis ``settings`` (pas de ``os.environ`` en dur).
+
+    Returns:
+        ``(handler,)`` si Langfuse est configuré et joignable, sinon ``()``.
+    """
+    if not settings.langfuse_enabled:
+        logger.info("Langfuse désactivé (clés absentes du .env)")
+        return ()
+    try:
+        from langfuse import Langfuse
+        from langfuse.langchain import CallbackHandler
+
+        # Initialise le client global du SDK v3 avec nos réglages typés.
+        Langfuse(
+            public_key=settings.langfuse_public_key,
+            secret_key=settings.langfuse_secret_key,
+            host=settings.langfuse_host,
+        )
+        handler = CallbackHandler()
+        logger.info("Langfuse activé → {}", settings.langfuse_host)
+        return (handler,)
+    except Exception:  # noqa: BLE001 — le monitoring ne doit jamais bloquer le métier
+        logger.warning("Langfuse indisponible : monitoring désactivé (fail-open)")
+        return ()
 
 
 @lru_cache(maxsize=1)

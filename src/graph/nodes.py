@@ -135,6 +135,42 @@ def harvest_facts(messages: list[BaseMessage]) -> list[str]:
     ]
 
 
+# Indices (déterministes) d'une demande d'informations que la base locale ne
+# possède PAS : elle stocke métadonnées et synopsis, jamais les coulisses.
+# Une question qui contient l'un de ces mots exige l'Enquêteur du Web, même
+# si le film est trouvé localement.
+_WEB_ONLY_HINTS = (
+    "anecdote",
+    "coulisse",
+    "tournage",
+    "making of",
+    "making-of",
+    "behind the scenes",
+    "trivia",
+    "secret",
+    "réception",
+    "interview",
+)
+
+
+def wants_web_details(question: str) -> bool:
+    """Détecte une demande d'informations hors du périmètre de la base locale.
+
+    La base (HorRAGor1) contient métadonnées et synopsis — pas les anecdotes,
+    coulisses de tournage ou la réception critique. Pour ces demandes, la
+    récolte locale n'est JAMAIS suffisante : l'Enquêteur doit partir, même si
+    le film est connu. Détection par mots-clés : déterministe et testable.
+
+    Args:
+        question: La question brute de l'utilisateur.
+
+    Returns:
+        True si la question réclame des informations que seul le web possède.
+    """
+    q = question.lower()
+    return any(hint in q for hint in _WEB_ONLY_HINTS)
+
+
 def _first_visit(state: AgentState, node: str) -> bool:
     """Indique si un nœud est traversé pour la première fois de ce run.
 
@@ -182,16 +218,26 @@ def rag_node(state: AgentState) -> dict:
         out["path"] = ["rag"]
     if not getattr(response, "tool_calls", None):
         # Fin de fouille : le nœud juge sa récolte (le routeur ne fera qu'aiguiller).
+        # Deux critères, tous deux déterministes : des faits ont été trouvés,
+        # ET la question ne réclame pas d'infos hors du périmètre local
+        # (anecdotes, coulisses... → l'Enquêteur part même si le film est connu).
         facts = harvest_facts(list(state.get("rag_messages") or []))
+        needs_web = wants_web_details(state["question"])
         out["lore"] = "\n".join(facts)
-        out["is_complete"] = bool(facts)
+        out["is_complete"] = bool(facts) and not needs_web
         trace.record(
             "node",
             "rag",
-            f"récolte {'suffisante' if facts else 'insuffisante'} "
-            f"({len(facts)} résultat(s) d'outil)",
+            f"récolte {'suffisante' if out['is_complete'] else 'insuffisante'} "
+            f"({len(facts)} résultat(s) d'outil"
+            f"{', détails web exigés par la question' if needs_web else ''})",
         )
-        logger.info("Agent RAG : récolte {} ({} fait(s))", out["is_complete"], len(facts))
+        logger.info(
+            "Agent RAG : récolte {} ({} fait(s), demande web: {})",
+            out["is_complete"],
+            len(facts),
+            needs_web,
+        )
     return out
 
 

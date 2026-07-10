@@ -136,8 +136,8 @@ Sauvegarder ce plan dans la mémoire persistante (`~/.claude/projects/-home-oliv
 - `horragor-ecosysteme.md` (type `project`) : cartographie HorRAGor1/2/MultiAgent et chemins des briques réutilisables
 - Mettre à jour `MEMORY.md` avec les pointeurs
 
-> **État d'avancement** — ✅ A (commit `7341243`) · ✅ B (`9e2d321`) · ✅ C (`faf130f`) · ⏳ D en cours · E/F/G à venir.
-> Réalisations notables : E2E validé sur les deux chemins avec qwen2.5:7b (18 s / 26 s) ; jugement de récolte déterministe (marqueur `"found"`) ; un canal de messages par agent (context trimming).
+> **État d'avancement** — ✅ A (commit `7341243`) · ✅ B (`9e2d321`) · ✅ C (`faf130f`) · ✅ D (`cdff125`) · ✅ E (Langfuse + routage sensible au type de question) · F/G à venir.
+> Réalisations notables : E2E validé sur les deux chemins avec qwen2.5:7b (18 s / 26 s) ; jugement de récolte déterministe (marqueur `"found"`) ; un canal de messages par agent (context trimming) ; API `/health` + `/metrics` + `/chat` et front Streamlit vérifiés en réel sur Supabase (TMDB + pgvector).
 
 ### Phase A — Socle du projet
 1. Initialiser le repo : `git init`, `uv init` (Python ≥ 3.12), `pyproject.toml` avec `langgraph`, `langchain-ollama`, `langchain-core`, `faiss-cpu`, `fastapi`, `uvicorn[standard]`, `streamlit`, `httpx`, `pydantic-settings`, `sqlalchemy`, `psycopg[binary]`, `pgvector`, `ddgs`, `langfuse` ; dev : `ruff`, `pytest`, `pytest-asyncio`
