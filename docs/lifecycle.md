@@ -367,5 +367,37 @@ l'API Données ont enregistré les requêtes émises par le graphe.
 
 ---
 
-*Chapitres suivants : JWT access/refresh (G2), conteneurisation + Traefik
-(G3), monitoring + Sphinx + Issues (G4).*
+## Chapitre 7 — Le verrou JWT access/refresh (Phase G2)
+
+Le brief exige « un système d'authentification robuste par Refresh Tokens
+pour verrouiller les échanges avec l'IHM ». Le flux d'une session :
+
+### `src/auth.py` — la serrurerie
+- **Entrées** : `POST /auth/login` (compte démo `APP_USERNAME`/`APP_PASSWORD`
+  du `.env`) ; `POST /auth/refresh` (le jeton long).
+- **Sorties** : une paire de JWT signés HS256 (`JWT_SECRET`) — **access**
+  ~15 min (présenté en `Authorization: Bearer` à chaque `/chat` : s'il fuite,
+  il expire vite) + **refresh** ~7 j (sert UNIQUEMENT à renouveler, avec
+  rotation complète à chaque usage).
+- **Ce qui s'y passe** : chaque jeton porte son `type` — un refresh présenté
+  sur `/chat` est refusé, un access sur `/auth/refresh` aussi. La dépendance
+  `require_access` verrouille les routes métier (401 explicites : jeton
+  requis / invalide / expiré). Auth non configurée → 503 propre.
+
+### `app_frontend.py` — la porte du manoir
+- **Entrées** : le formulaire « 🗝️ Entrée du manoir » (sidebar).
+- **Sorties** : les jetons en `session_state` ; l'accès au chat.
+- **Ce qui s'y passe** : porte close tant que non connecté (`st.stop()`).
+  À chaque question, l'access token part en Bearer ; sur 401, le front tente
+  UNE prolongation silencieuse via le refresh puis rejoue la requête — la
+  session se prolonge sans que l'utilisateur ne s'en aperçoive, jusqu'à
+  expiration du refresh (reconnexion demandée avec élégance).
+
+**Vu en réel** : `/chat` sans jeton → 401 ; mauvais mot de passe → 401 ;
+login → paire de jetons ; `/chat` avec Bearer → 200 et récit complet.
+10 tests couvrent la serrurerie (types croisés, expiration, non configurée).
+
+---
+
+*Chapitres suivants : conteneurisation + Traefik (G3), monitoring + Sphinx +
+Issues (G4).*

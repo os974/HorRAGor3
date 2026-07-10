@@ -21,6 +21,8 @@ from fastapi.middleware.cors import CORSMiddleware
 from loguru import logger
 from prometheus_fastapi_instrumentator import Instrumentator
 
+from src.auth import require_access
+from src.auth import router as auth_router
 from src.config import settings
 from src.contracts.interfaces import AgentEngine
 from src.contracts.schemas import ChatRequest, ChatResponse
@@ -71,7 +73,12 @@ app.add_middleware(
 # latences, comptes et statuts par route, prêts pour la stack de la Phase G.
 Instrumentator().instrument(app).expose(app)
 
+# /auth/login et /auth/refresh (JWT access + refresh — exigence du brief).
+app.include_router(auth_router)
+
 EngineDep = Annotated[AgentEngine, Depends(get_engine)]
+# L'identité vérifiée par le jeton d'accès (401 sinon) : verrouille les routes métier.
+UserDep = Annotated[str, Depends(require_access)]
 
 
 @app.get("/health")
@@ -85,15 +92,16 @@ async def health() -> dict[str, str]:
 
 
 @app.post("/chat", response_model=ChatResponse)
-async def chat(req: ChatRequest, engine: EngineDep) -> ChatResponse:
-    """Délègue la question au moteur multi-agent.
+async def chat(req: ChatRequest, engine: EngineDep, user: UserDep) -> ChatResponse:
+    """Délègue la question au moteur multi-agent (route verrouillée par JWT).
 
     Args:
         req: Message utilisateur et identifiant de session.
         engine: Le moteur injecté (GraphEngine, ou fake dans les tests).
+        user: L'identité extraite du jeton d'accès (401 si absent/invalide).
 
     Returns:
         La réponse complète (récit gothique, parcours, sources, trace).
     """
-    logger.info("POST /chat [{}] : {!r}", req.session_id, req.message[:80])
+    logger.info("POST /chat [{}] par {} : {!r}", req.session_id, user, req.message[:80])
     return await engine.run(req)

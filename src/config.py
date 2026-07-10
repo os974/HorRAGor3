@@ -52,6 +52,12 @@ class Settings(BaseSettings):
         faiss_index_dir: Dossier de persistance de l'index FAISS (gitignoré),
             ``data/faiss_index`` conformément à l'arborescence du brief.
         faiss_score_threshold: Seuil cosinus sous lequel un titre est inconnu.
+        jwt_secret: Secret de signature des JWT (secret ; vide = auth
+            inutilisable, /auth/login répond 503).
+        app_username: Compte de démonstration de l'IHM (secret).
+        app_password: Mot de passe du compte démo (secret).
+        access_token_minutes: Durée de vie du jeton d'accès (défaut 15 min).
+        refresh_token_days: Durée de vie du jeton de renouvellement (7 j).
         langfuse_public_key: Clé publique Langfuse (secret ; vide = désactivé).
         langfuse_secret_key: Clé secrète Langfuse (secret ; vide = désactivé).
         langfuse_host: URL du serveur Langfuse self-hosted.
@@ -90,6 +96,13 @@ class Settings(BaseSettings):
     titles_db_path: str = "../HorRAGor1/data/horragor.db"
     faiss_index_dir: str = "data/faiss_index"
     faiss_score_threshold: float = 0.75
+
+    # --- Auth JWT (brief : refresh tokens IHM ↔ API IA) : SECRETS ---
+    jwt_secret: str = ""
+    app_username: str = ""
+    app_password: str = ""
+    access_token_minutes: int = 15
+    refresh_token_days: int = 7
 
     # --- Langfuse (Phase E) : fail-open si clés absentes ---
     langfuse_public_key: str = ""
