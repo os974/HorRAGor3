@@ -40,8 +40,70 @@ _TRACE_ICONS = {
 }
 
 
+def _login(username: str, password: str) -> bool:
+    """Authentifie le compte auprès de ``POST /auth/login``.
+
+    Args:
+        username: Nom du compte démo.
+        password: Mot de passe associé.
+
+    Returns:
+        True si la paire de jetons a été obtenue et stockée en session.
+    """
+    resp = httpx.post(
+        f"{settings.api_base_url}/auth/login",
+        json={"username": username, "password": password},
+        timeout=15,
+    )
+    if resp.status_code != 200:
+        return False
+    tokens = resp.json()
+    st.session_state.access_token = tokens["access_token"]
+    st.session_state.refresh_token = tokens["refresh_token"]
+    return True
+
+
+def _refresh_tokens() -> bool:
+    """Renouvelle la paire de jetons via ``POST /auth/refresh``.
+
+    Returns:
+        True si la session a pu être prolongée (sinon : re-login requis).
+    """
+    refresh_token = st.session_state.get("refresh_token")
+    if not refresh_token:
+        return False
+    resp = httpx.post(
+        f"{settings.api_base_url}/auth/refresh",
+        json={"refresh_token": refresh_token},
+        timeout=15,
+    )
+    if resp.status_code != 200:
+        return False
+    tokens = resp.json()
+    st.session_state.access_token = tokens["access_token"]
+    st.session_state.refresh_token = tokens["refresh_token"]
+    return True
+
+
+def _post_chat(req: ChatRequest) -> httpx.Response:
+    """Poste la requête de chat avec le jeton d'accès courant.
+
+    Args:
+        req: La requête à envoyer.
+
+    Returns:
+        La réponse HTTP brute (le statut est géré par l'appelant).
+    """
+    return httpx.post(
+        f"{settings.api_base_url}/chat",
+        json=req.model_dump(),
+        headers={"Authorization": f"Bearer {st.session_state.get('access_token', '')}"},
+        timeout=180,  # trois agents + outils web : un run complet peut être long
+    )
+
+
 def _send_message(message: str, session_id: str = "default") -> ChatResponse:
-    """Envoie la question à ``POST /chat`` et revalide la réponse.
+    """Envoie la question à ``POST /chat`` (JWT), avec refresh automatique sur 401.
 
     Args:
         message: La question de l'utilisateur.
@@ -52,13 +114,15 @@ def _send_message(message: str, session_id: str = "default") -> ChatResponse:
 
     Raises:
         httpx.HTTPError: API injoignable ou statut d'échec (affiché en bulle).
+        PermissionError: Session expirée malgré le refresh (re-login requis).
     """
     req = ChatRequest(message=message, session_id=session_id)
-    resp = httpx.post(
-        f"{settings.api_base_url}/chat",
-        json=req.model_dump(),
-        timeout=180,  # trois agents + outils web : un run complet peut être long
-    )
+    resp = _post_chat(req)
+    if resp.status_code == 401:
+        # Access token expiré : on tente UNE prolongation via le refresh token.
+        if not _refresh_tokens():
+            raise PermissionError("session expirée — reconnecte-toi")
+        resp = _post_chat(req)
     resp.raise_for_status()
     return ChatResponse.model_validate(resp.json())
 
@@ -102,9 +166,24 @@ with st.sidebar:
         "Système multi-agent LangGraph : un Chercheur fouille la crypte locale, "
         "un Enquêteur arpente le web si besoin, un Écrivain Gothique conte le tout."
     )
-    if st.button("🗑️ Nouvelle conversation", use_container_width=True):
-        st.session_state.messages = []
-        st.rerun()
+    # Le verrou du manoir : pas de jetons → formulaire de connexion (JWT).
+    if "access_token" not in st.session_state:
+        with st.form("login"):
+            st.subheader("🗝️ Entrée du manoir")
+            username = st.text_input("Utilisateur")
+            password = st.text_input("Mot de passe", type="password")
+            if st.form_submit_button("Se connecter", use_container_width=True):
+                if _login(username, password):
+                    st.rerun()
+                st.error("Identifiants invalides")
+    else:
+        if st.button("🚪 Se déconnecter", use_container_width=True):
+            for key in ("access_token", "refresh_token", "messages"):
+                st.session_state.pop(key, None)
+            st.rerun()
+        if st.button("🗑️ Nouvelle conversation", use_container_width=True):
+            st.session_state.messages = []
+            st.rerun()
     st.markdown("**Exemples :**")
     st.markdown(
         "- Parle-moi du film Hereditary\n"
@@ -113,6 +192,11 @@ with st.sidebar:
     )
 
 st.title("Le Manoir de l'Horreur 🕸️")
+
+# Porte close tant que le visiteur n'est pas authentifié.
+if "access_token" not in st.session_state:
+    st.info("🗝️ Connecte-toi dans la barre latérale pour entrer dans le manoir.")
+    st.stop()
 
 # session_state : Streamlit ré-exécute tout le script à chaque interaction ;
 # c'est ici que l'historique survit entre deux rendus.

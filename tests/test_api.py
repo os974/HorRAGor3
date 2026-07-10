@@ -4,6 +4,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 import src.main as main
+from src.auth import require_access
 from src.contracts.schemas import ChatRequest, ChatResponse
 from src.engine import get_engine
 
@@ -21,9 +22,14 @@ class FakeEngine:
 
 @pytest.fixture
 def client(monkeypatch):
-    """TestClient avec index FAISS absent (lifespan dégradé) et moteur factice."""
+    """TestClient : index FAISS absent, moteur factice, auth court-circuitée.
+
+    L'auth JWT a ses propres tests (test_auth.py) ; ici on teste le contrat
+    HTTP des routes métier, visiteur déjà authentifié.
+    """
     monkeypatch.setattr(main.TitleIndex, "exists", classmethod(lambda cls, d=None: False))
     main.app.dependency_overrides[get_engine] = lambda: FakeEngine()
+    main.app.dependency_overrides[require_access] = lambda: "testeur"
     with TestClient(main.app) as test_client:
         yield test_client
     main.app.dependency_overrides.clear()
