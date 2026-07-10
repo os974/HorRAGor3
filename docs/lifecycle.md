@@ -333,4 +333,39 @@ sous chaque étape. 83 tests, ~92 % de couverture, exécution < 1 s.
 
 ---
 
-*Chapitre suivant : épilogue MLOps (G).*
+## Chapitre 6 — La couche Données encapsulée (Phase G1)
+
+Premier acte de l'épilogue MLOps : la base n'est plus jamais touchée
+directement par la couche IA.
+
+### `services/data_api/main.py` — l'API Données (couche 1 du brief)
+- **Entrées** : `GET /films/{id}`, `GET /films/{id}/similar?k=` (+ `/health`,
+  `/metrics`) — appelées uniquement par l'API IA via le réseau privé.
+- **Sorties** : `FilmMetadata` / `list[FilmRef]` (contrats partagés) ; 404 si
+  film inconnu ; **503** propre si la base est injoignable (jamais de 500 brut).
+- **Ce qui s'y passe** : c'est désormais le SEUL composant à connaître
+  `DATABASE_URL` (Supabase encapsulé — décision actée : le brief est ainsi
+  respecté sans migrer la base). Réutilise `SupabaseFilmRepository` tel quel,
+  Loguru, Instrumentator, repository injectable pour les tests. En cluster
+  (G3), ce service n'aura **aucun port publié**.
+
+### `src/data/http_repository.py` — le client côté IA
+- **Entrées** : les appels de `rag_tool` (get_metadata, recommend_similar).
+- **Sorties** : les mêmes objets typés que le repository SQL — contrat
+  `FilmRepository` identique, revalidé par Pydantic à la réception.
+- **Ce qui s'y passe** : le swap prévu depuis la Phase A paie : `rag_tool`
+  choisit l'implémentation selon `DATA_API_URL` (définie → HTTP via le réseau
+  privé ; vide → accès direct Supabase, mode dev). 404 → None (même
+  sémantique), erreurs réseau → exceptions httpx, absorbées par le contrat
+  « jamais d'exception » de la couche outils.
+
+**Vu en réel** : API Données sur :8100 face à Supabase (film 41 = Hereditary
+2018, similaires de Midsommar, 404 propre) ; puis API IA lancée avec
+`DATA_API_URL=http://127.0.0.1:8100` → `/chat` complet, et la **preuve par
+Prometheus** : les compteurs `http_requests_total{handler="/films/..."}` de
+l'API Données ont enregistré les requêtes émises par le graphe.
+
+---
+
+*Chapitres suivants : JWT access/refresh (G2), conteneurisation + Traefik
+(G3), monitoring + Sphinx + Issues (G4).*
