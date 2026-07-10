@@ -30,12 +30,24 @@ uv sync
 cp .env.example .env   # puis remplir les secrets
 ```
 
+## Lancement
+
+```bash
+# Terminal 1 — l'API (charge l'index FAISS au démarrage)
+uv run uvicorn src.main:app --reload
+
+# Terminal 2 — le front
+uv run streamlit run app_frontend.py
+```
+
+Endpoints : `GET /health`, `GET /metrics` (Prometheus), `POST /chat`.
+
 ## État d'avancement
 
 - [x] Phase A — Socle (config, contracts, trace, logging Loguru, index FAISS)
 - [x] Phase B — Outils natifs (rag_tool : FAISS+SQL+pgvector ; scraper_tool : Wikipédia+DuckDuckGo)
 - [x] Phase C — Graphe multi-agent (state multi-canaux, 3 nœuds, routeurs purs, pipeline compilé)
-- [ ] Phase D — API FastAPI + front Streamlit
+- [x] Phase D — API FastAPI (/health, /metrics, /chat) + front Streamlit (parcours des agents)
 - [ ] Phase E — Monitoring Langfuse
 - [ ] Phase F — Tests (≥ 80 %) + CI
 - [ ] Phase G — Épilogue MLOps (Docker, JWT, Prometheus/Grafana/Uptime Kuma, Sphinx)

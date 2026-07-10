@@ -13,10 +13,10 @@ HorRAGor3 sans ouvrir le code.
 Utilisateur (navigateur)
    │ question en français
    ▼
-app_frontend.py (Streamlit)                     [Phase D — à venir]
+app_frontend.py (Streamlit)
    │ POST /chat {message, session_id}
    ▼
-src/main.py (FastAPI)                           [Phase D — à venir]
+src/main.py (FastAPI) → src/engine.py (GraphEngine)
    │ ChatRequest → AgentEngine.run()
    ▼
 src/graph/pipeline.py (graphe compilé)
@@ -212,5 +212,52 @@ la plume gothique romance sans inventer.
 
 ---
 
-*Chapitres suivants (au fil des phases) : API et Front (D), monitoring
-Langfuse (E).*
+## Chapitre 3 — L'API et le Front (Phase D)
+
+La requête traverse maintenant tout le système, du navigateur au récit.
+
+### `app_frontend.py` — la salle de lecture (Streamlit)
+- **Entrées** : la question tapée dans `st.chat_input` ; l'historique de
+  `st.session_state`.
+- **Sorties** : `POST /chat` vers l'API ; l'affichage du récit, du **parcours
+  des agents** (🔎 Chercheur → 🕵️ Enquêteur → 🖋️ Écrivain — la preuve visuelle
+  du routage conditionnel), des sources, et l'expander « Dans les coulisses du
+  manoir » (la trace complète).
+- **Ce qui s'y passe** : découplage strict — aucune logique LLM/BDD, seulement
+  un client HTTP qui revalide la réponse contre le contrat Pydantic partagé.
+  Toute erreur API s'affiche en bulle, jamais de crash. Lancement :
+  `uv run streamlit run app_frontend.py`.
+
+### `src/main.py` — la porte d'entrée (FastAPI/Uvicorn)
+- **Entrées** : requêtes HTTP (`/health`, `/metrics`, `POST /chat`).
+- **Sorties** : `ChatResponse` JSON ; métriques Prometheus ; logs Loguru.
+- **Ce qui s'y passe** : `setup_logging()` unifie les logs (uvicorn compris) ;
+  le `lifespan` charge l'index FAISS une fois en RAM (dégradation propre s'il
+  manque) et l'injecte dans `rag_tool` ; `/metrics` est exposé dès la
+  naissance (prometheus-fastapi-instrumentator — règle observabilité) ;
+  `/chat` délègue au moteur via l'abstraction `AgentEngine` (inversion de
+  dépendance : les tests injectent un fake). Lancement :
+  `uv run uvicorn src.main:app --reload`.
+
+### `src/engine.py` — le pont contrat ↔ graphe (GraphEngine)
+- **Entrées** : `ChatRequest` (message + session_id).
+- **Sorties** : `ChatResponse` (récit, path, sources, trace) — **jamais
+  d'exception** : récursion excessive ou panne → réponse de repli gothique,
+  pas de 500.
+- **Ce qui s'y passe** : `trace.begin()` ouvre la collecte ; le graphe
+  synchrone s'exécute dans `asyncio.to_thread` (la boucle FastAPI ne gèle
+  pas, le ContextVar se propage) ; `story` devient `answer`, `path` sort tel
+  quel, les `sources` sont dérivées de la trace (kinds faiss/sql/pgvector/
+  tmdb/wikipedia/ddg) ; `_invoke_config()` est le point d'ancrage où la
+  Phase E branchera le CallbackHandler Langfuse ; `log_trace` archive le run
+  dans `logs/traces.jsonl`.
+
+**Vu en conditions réelles** : `.env` branché sur Supabase (métadonnées
+enrichies TMDB : réalisateur/casting, et recommandations pgvector réelles) ;
+`/health` ok, `/metrics` Prometheus actif, « Des films semblables à
+Midsommar ? » → `[rag, narration]`, 7 étapes de trace, réponse gothique en
+19 s ; Streamlit démarré, `/_stcore/health` = ok (la future cible Uptime Kuma).
+
+---
+
+*Chapitre suivant : monitoring Langfuse (E).*
