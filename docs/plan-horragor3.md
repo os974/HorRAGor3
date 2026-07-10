@@ -136,7 +136,8 @@ Sauvegarder ce plan dans la mémoire persistante (`~/.claude/projects/-home-oliv
 - `horragor-ecosysteme.md` (type `project`) : cartographie HorRAGor1/2/MultiAgent et chemins des briques réutilisables
 - Mettre à jour `MEMORY.md` avec les pointeurs
 
-> **État d'avancement** — ✅ A (commit `7341243`) · ✅ B (`9e2d321`) · ✅ C (`faf130f`) · ✅ D (`cdff125`) · ✅ E (Langfuse + routage sensible au type de question) · ✅ F (83 tests, 92 %, CI) · G à venir.
+> **État d'avancement** — ✅ A (commit `8978270`) · ✅ B (`958a042`) · ✅ C (`89f6adb`) · ✅ D (`9da4371`) · ✅ E (`6d98050`, Langfuse + routage sensible au type de question) · ✅ F (`abd56b1`, 83 tests, 92 %, CI) · G à venir.
+> (Hashs réécrits le 2026-07-10 avant le premier push : correction de l'email d'auteur → `olivier.schollaert@live.be`.)
 > Réalisations notables : E2E validé sur les deux chemins avec qwen2.5:7b (18 s / 26 s) ; jugement de récolte déterministe (marqueur `"found"`) ; un canal de messages par agent (context trimming) ; API `/health` + `/metrics` + `/chat` et front Streamlit vérifiés en réel sur Supabase (TMDB + pgvector).
 
 ### Phase A — Socle du projet
