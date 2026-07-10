@@ -175,8 +175,11 @@ Une requête y entre comme une `question` et en ressort comme une `story`.
 - **Ce qui s'y passe** : les trois personnalités vivent ici (prompts
   SystemMessage). `rag_node` (température 0, outils `RAG_TOOLS`) fouille en
   micro-boucle puis **juge sa récolte de façon déterministe** : `is_complete`
-  = au moins un outil a marqué `"found": true` — aucun LLM dans la décision
-  de routage. `scraper_node` reçoit un brief reformulé (question + lore),
+  = au moins un outil a marqué `"found": true` **ET** la question ne réclame
+  pas d'informations hors du périmètre local (`wants_web_details` : mots-clés
+  anecdotes/coulisses/tournage... — la base n'a que métadonnées et synopsis,
+  donc ces demandes envoient l'Enquêteur même si le film est connu). Aucun
+  LLM dans la décision de routage. `scraper_node` reçoit un brief reformulé (question + lore),
   jamais l'historique du Chercheur (anti-collision de tokens). Il fige ses
   `web_findings` (faits bruts du web). `narration_node` (température 0.7,
   AUCUN outil) reçoit un dossier synthétique — question + lore + web_findings
@@ -260,4 +263,45 @@ Midsommar ? » → `[rag, narration]`, 7 étapes de trace, réponse gothique en
 
 ---
 
-*Chapitre suivant : monitoring Langfuse (E).*
+## Chapitre 4 — Le monitoring Langfuse (Phase E)
+
+Langfuse est le « tableau de bord visuel » du registre de bord : chaque
+question devient une **trace** consultable sur `http://localhost:3000`.
+
+### La stack Langfuse (hors du repo : `../langfuse/`, self-hosted)
+- **Entrées** : les événements envoyés par le CallbackHandler de l'API.
+- **Sorties** : l'UI d'analyse (arbre des décisions, tokens, latences, coûts).
+- **Ce qui s'y passe** : `docker compose up -d` démarre 6 conteneurs — web
+  (l'UI, port 3000), worker (ingestion), Postgres (comptes/projets),
+  ClickHouse (le stockage analytique des traces), Redis (file d'attente),
+  MinIO (blobs). ⚠️ Particularité locale : ClickHouse voulait publier le port
+  hôte 9000, déjà pris par Portainer → `docker-compose.override.yml` le
+  décale vers 9002 (les services internes n'en dépendent pas).
+
+### `src/engine.py::_langfuse_callbacks()` — le branchement
+- **Entrées** : `settings.langfuse_*` (clés du `.env`, générées dans l'UI).
+- **Sorties** : le `CallbackHandler` passé au graphe via
+  `config={"callbacks": [...]}` (le mécanisme exact du brief), plus
+  `langfuse_session_id` pour regrouper les traces par conversation.
+- **Ce qui s'y passe** : **fail-open** — clés absentes ou serveur éteint →
+  tuple vide, l'application fonctionne à l'identique. SDK **v3** : l'import
+  est `from langfuse.langchain import CallbackHandler` (le snippet v2 du
+  brief n'est plus valide) et le client est initialisé explicitement depuis
+  `settings` (pas de `os.environ` en dur). Piège rencontré : l'intégration
+  exige le méta-paquet `langchain` en plus de `langchain-core` — ajouté aux
+  dépendances.
+
+### Ce qu'on lit dans une trace (vu en réel, question « anecdotes Heriditary »)
+- L'arbre : `LangGraph` → CHAIN par nœud (`rag`, `scraper`, `narration`) et
+  par **routeur** (`should_continue_rag`, `should_continue_scraper` — l'arbre
+  de décisions du brief), TOOL par outil (`lookup_movie`,
+  `wikipedia_synopsis`, `web_search`).
+- Les 8 générations LLM avec **tokens entrée/sortie et latence chacune** —
+  ex. la narration finale : 1 454 tokens in → 525 out en 13,5 s ; les
+  décisions d'outils : ~25-40 tokens out en ~1 s.
+- La preuve du **context trimming** : la génération de la narration ne
+  contient que le dossier synthétique, pas les logs d'outils.
+
+---
+
+*Chapitres suivants : tests + CI (F), épilogue MLOps (G).*
