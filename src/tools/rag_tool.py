@@ -28,6 +28,7 @@ from src.contracts.schemas import FilmMetadata, FilmRef
 from src.data import tmdb
 from src.data.embed import embed_text
 from src.data.faiss_index import TitleIndex, normalize_title
+from src.data.http_repository import HttpFilmRepository
 from src.data.repository import SupabaseFilmRepository
 
 _index: TitleIndex | None = None
@@ -67,14 +68,21 @@ def _get_index() -> TitleIndex:
 
 
 def _get_repository() -> FilmRepository:
-    """Renvoie le repository injecté, ou en crée un (connexion paresseuse).
+    """Renvoie le repository injecté, ou en crée un selon la config.
+
+    En cluster (``settings.data_api_url`` définie), la couche IA passe par
+    l'API Données via HTTP — elle ne connaît pas ``DATABASE_URL``. En dev
+    (URL vide), accès direct Supabase comme en Partie 2.
 
     Returns:
-        Le repository films.
+        Le repository films actif.
     """
     global _repository
     if _repository is None:
-        _repository = SupabaseFilmRepository()
+        if settings.data_api_url:
+            _repository = HttpFilmRepository()
+        else:
+            _repository = SupabaseFilmRepository()
     return _repository
 
 

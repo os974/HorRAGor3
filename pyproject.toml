@@ -59,7 +59,8 @@ testpaths = ["tests"]
 pythonpath = ["."]
 
 [tool.coverage.run]
-source = ["src"]
+# « Les deux API » du brief : la couche IA (src) ET la couche Données (services).
+source = ["src", "services"]
 # L'UI Streamlit sera testée en Phase G (st.testing.AppTest) ; hors mesure d'ici là.
 omit = ["app_frontend.py"]
 

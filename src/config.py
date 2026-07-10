@@ -45,6 +45,9 @@ class Settings(BaseSettings):
         embedding_dim: Dimension des vecteurs. DOIT correspondre à la colonne
             pgvector ``vector(768)`` ET à l'index FAISS — la changer impose de
             tout ré-embedder.
+        data_api_url: URL de l'API Données du cluster. Si définie, la couche IA
+            passe par HttpFilmRepository (jamais d'accès direct à la base —
+            exigence de l'épilogue) ; vide = accès direct Supabase (mode dev).
         titles_db_path: Repli hors-ligne pour les titres : SQLite de HorRAGor1.
         faiss_index_dir: Dossier de persistance de l'index FAISS (gitignoré),
             ``data/faiss_index`` conformément à l'arborescence du brief.
@@ -78,6 +81,10 @@ class Settings(BaseSettings):
     narration_temperature: float = 0.7
     embedding_model: str = "nomic-embed-text"
     embedding_dim: int = 768
+
+    # --- API Données (cluster) : si définie, l'IA ne parle plus jamais à la base ---
+    # Ex. http://api-donnees:8100 dans le compose ; vide = accès direct Supabase (dev).
+    data_api_url: str = ""
 
     # --- FAISS (validation de titres, index repris de HorRAGor2) ---
     titles_db_path: str = "../HorRAGor1/data/horragor.db"
