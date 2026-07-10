@@ -69,7 +69,9 @@ class TraceStep(BaseModel):
     """Une étape du raisonnement (pour l'expander « Raisonnement » du Front).
 
     Attributes:
-        kind: Type d'étape — "node" | "tool" | "router" | "verdict".
+        kind: Type d'étape, libre — étapes du graphe ("node", "router") ou
+            sources fines ("faiss", "sql", "pgvector", "tmdb", "wikipedia",
+            "ddg", "embed"). Sert d'icône côté Front.
         name: Nom du nœud, de l'outil ou de l'événement.
         detail: Arguments, extrait du résultat ou raison de la décision.
     """

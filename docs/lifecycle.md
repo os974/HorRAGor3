@@ -105,5 +105,53 @@ les étapes. Ils se lisent en premier car tout le reste s'appuie dessus.
 
 ---
 
-*Chapitres suivants (au fil des phases) : outils natifs (B), graphe
-multi-agent (C), API et Front (D), monitoring Langfuse (E).*
+## Chapitre 1 — Les outils natifs (Phase B)
+
+Les outils sont les **mains** des agents : des fonctions Python pures que les
+nœuds du graphe exposeront au LLM (Phase C). Contrat commun, pensé pour un
+agent : **aucune fonction publique ne lève jamais d'exception** — erreur
+technique → None/[]/message explicite + log Loguru + trace. Un outil qui
+plante ne fait pas s'effondrer le graphe ; c'est le routeur qui décidera de
+la suite (ex. récolte locale vide → Scraper).
+
+### `src/data/` — la plomberie sous les outils (reprise de HorRAGor2)
+- **Entrées** : `settings` (Ollama, DATABASE_URL, chemins FAISS).
+- **Sorties** : primitives typées utilisées par les outils.
+- **Ce qui s'y passe** : `embed.py` (vecteurs via Ollama `/api/embed`, garde-fou
+  sur la dimension 768), `faiss_index.py` (classe `TitleIndex`, IndexFlatIP
+  cosinus, recherche sans embedding → testable sans Ollama), `db.py` (engine
+  SQLAlchemy unique, Supabase ou repli `sqlite:///../HorRAGor1/...`),
+  `repository.py` (SQL paramétré — le LLM n'écrit JAMAIS de SQL), `tmdb.py`
+  (réalisateur/casting, absents de la base). Les agents n'accèdent jamais à
+  cette couche directement : toujours via les outils.
+
+### `src/tools/rag_tool.py` — l'outil de l'Agent RAG (Chercheur Local)
+- **Entrées** : un titre approximatif, puis un `film_id` confirmé.
+- **Sorties** : `FilmRef` (validation), `FilmMetadata` (lore brut : année,
+  genres, note, synopsis, réalisateur/casting via TMDB), `list[FilmRef]`
+  (recommandations pgvector).
+- **Ce qui s'y passe** : `validate_film` embedde le titre et interroge FAISS —
+  score ≥ 0.75 = film confirmé avec son id ; la casse est normalisée, mais une
+  faute de frappe tombe sous le seuil → None (c'est voulu : le routeur enverra
+  alors enquêter le Scraper). `query_movie_metadata` va chercher le lore en SQL
+  avec cet id (seule source autorisée pour les faits — 0 hallucination) et
+  enrichit réalisateur/casting via TMDB en best-effort. `find_similar_horror_movies`
+  interroge pgvector (contenu des synopsis, pas les titres). Singletons
+  injectables (`set_index`/`set_repository`) : l'API injecte les vrais au
+  démarrage, les tests des fakes.
+
+### `src/tools/scraper_tool.py` — l'outil de l'Agent Scraper (Enquêteur du Web)
+- **Entrées** : un titre (Wikipédia) ou une requête libre (DuckDuckGo).
+- **Sorties** : un extrait encyclopédique (str), ou une liste de
+  `{"title", "url", "snippet"}`.
+- **Ce qui s'y passe** : `scrape_detailed_synopsis` appelle l'API REST
+  Wikipédia (résumé d'article, gestion des homonymies, User-Agent ASCII
+  obligatoire). `search_web` interroge DuckDuckGo via `ddgs` (métamoteur sans
+  clé API) pour les anecdotes hors Wikipédia — ex. la page trivia IMDb d'un
+  film. Les messages d'erreur sont rédigés pour être restitués tels quels par
+  l'agent (« Aucune page Wikipédia trouvée pour... »).
+
+---
+
+*Chapitres suivants (au fil des phases) : graphe multi-agent (C), API et
+Front (D), monitoring Langfuse (E).*
