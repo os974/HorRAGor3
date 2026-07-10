@@ -34,7 +34,7 @@ cp .env.example .env   # puis remplir les secrets
 
 - [x] Phase A — Socle (config, contracts, trace, logging Loguru, index FAISS)
 - [x] Phase B — Outils natifs (rag_tool : FAISS+SQL+pgvector ; scraper_tool : Wikipédia+DuckDuckGo)
-- [ ] Phase C — Graphe multi-agent (state, nodes, router, pipeline)
+- [x] Phase C — Graphe multi-agent (state multi-canaux, 3 nœuds, routeurs purs, pipeline compilé)
 - [ ] Phase D — API FastAPI + front Streamlit
 - [ ] Phase E — Monitoring Langfuse
 - [ ] Phase F — Tests (≥ 80 %) + CI
