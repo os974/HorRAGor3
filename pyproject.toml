@@ -1,0 +1,56 @@
+[project]
+name = "horragor3"
+version = "0.1.0"
+description = "HorRAGor BOT Partie 3 — système multi-agent peer-to-peer (RAG, Scraper, Narration) sous LangGraph"
+requires-python = ">=3.12"
+dependencies = [
+    # --- Orchestration multi-agent ---
+    "langgraph>=1.2",
+    "langchain-core>=1.0",
+    "langchain-ollama>=1.1",
+    # --- Retrieval (index de titres + reco pgvector) ---
+    "faiss-cpu>=1.14",
+    "numpy>=2",
+    "sqlalchemy>=2.0.50",
+    "psycopg[binary]>=3.2",
+    "pgvector>=0.4",
+    # --- API + Front ---
+    "fastapi>=0.115",
+    "uvicorn[standard]>=0.30",
+    "streamlit>=1.38",
+    "httpx>=0.27",
+    "pydantic>=2.7",
+    "pydantic-settings>=2.4",
+    # --- Scraper web (agent Enquêteur) ---
+    "ddgs>=9",
+    # --- Observabilité (règle : dès la Phase A, pas en Phase G) ---
+    # langfuse épinglé en v3 : l'import CallbackHandler a changé entre v2 et v3.
+    "langfuse>=3,<4",
+    "loguru>=0.7",
+    "prometheus-fastapi-instrumentator>=7",
+]
+
+[dependency-groups]
+dev = [
+    "ruff>=0.8",
+    "pytest>=8",
+    "pytest-asyncio>=0.24",
+    "pytest-cov>=6",
+]
+
+[tool.uv]
+# Projet "application" non packagé : on lance depuis la racine (uv run uvicorn src.main:app),
+# les imports se font en `src.*` — conforme à l'arborescence imposée par le brief.
+package = false
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+# T201 : interdit les print() — règle observabilité du projet (Loguru partout).
+extend-select = ["I", "T201"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
