@@ -48,14 +48,16 @@ Endpoints : `GET /health`, `GET /metrics` (Prometheus), `POST /auth/login`, `POS
 
 ```bash
 ./scripts/gen_certs.sh     # une fois : CA locale + certificat TLS
+./scripts/dump_supabase.sh # une fois : dump de la base (POSTGRES_* requis dans .env)
 docker compose up -d --build
 ```
 
 Puis ouvre **https://horragor.localhost** (accepte le certificat de la CA locale,
 ou importe `certs/ca.pem` dans le navigateur) et connecte-toi avec
 `APP_USERNAME`/`APP_PASSWORD` du `.env`. Architecture : Traefik (443, seul port
-publié) → Streamlit → API IA (JWT) → réseau privé étanche → API Données → Supabase.
-Ollama et Langfuse restent sur l'hôte.
+publié) → Streamlit → API IA (JWT) → réseau privé étanche → API Données →
+Postgres + pgvector (conteneur, réseau interne dédié). Ollama et Langfuse restent
+sur l'hôte.
 
 ## Tests
 

@@ -344,8 +344,8 @@ directement par la couche IA.
 - **Sorties** : `FilmMetadata` / `list[FilmRef]` (contrats partagés) ; 404 si
   film inconnu ; **503** propre si la base est injoignable (jamais de 500 brut).
 - **Ce qui s'y passe** : c'est désormais le SEUL composant à connaître
-  `DATABASE_URL` (Supabase encapsulé — décision actée : le brief est ainsi
-  respecté sans migrer la base). Réutilise `SupabaseFilmRepository` tel quel,
+  `DATABASE_URL` (Supabase encapsulé à ce stade ; décision révisée au
+  chapitre 9 : la base elle-même rejoint le cluster). Réutilise `SupabaseFilmRepository` tel quel,
   Loguru, Instrumentator, repository injectable pour les tests. En cluster
   (G3), ce service n'aura **aucun port publié**.
 
@@ -446,7 +446,8 @@ navigateur ── https://horragor.localhost ──> traefik (443, SEUL port pub
 - **Sorties** : 4 services — traefik, frontend, api-ia, api-donnees.
 - **Ce qui s'y passe** : `data_net` est **internal** (le réseau privé étanche
   du brief : api-donnees n'a AUCUN port publié, seul api-ia l'atteint) ;
-  api-donnees possède une seconde patte réseau pour joindre Supabase ;
+  api-donnees possède une seconde patte réseau pour joindre Supabase
+  (supprimée au chapitre 9, quand la base rejoint le cluster) ;
   **ségrégation des secrets** : `DATABASE_URL` n'est fourni qu'à api-donnees,
   api-ia ne reçoit que `DATA_API_URL` ; Ollama et Langfuse restent sur l'hôte
   (`host-gateway`) ; l'index FAISS est monté en volume RO (jamais dans
@@ -461,5 +462,63 @@ navigateur ── https://horragor.localhost ──> traefik (443, SEUL port pub
   l'exigence « les deux API **et l'UI** » est complète.
 
 ---
+
+---
+
+## Chapitre 9 — La base souveraine (BDD conteneurisée)
+
+Relecture du brief : « La base de données doit être encapsulée derrière sa
+propre API dédiée. **L'ensemble** doit être conteneurisé au sein d'un réseau
+privé Docker étanche », pour une « infrastructure **souveraine** ». Garder
+Supabase (un service cloud) derrière l'API laissait la base elle-même hors du
+cluster : elle y entre désormais.
+
+```
+api-ia ──data_net (internal)──> api-donnees ──db_net (internal)──> db (Postgres + pgvector)
+```
+
+### `scripts/dump_supabase.sh` — l'extraction
+- **Entrées** : `DATABASE_URL` du `.env` (Supabase, ou `SOURCE_DATABASE_URL`).
+- **Sorties** : `data/db_init/horragor.dump` (format custom, ~79 Mo, gitignoré).
+- **Ce qui s'y passe** : `pg_dump` du schéma `public` exécuté DANS l'image du
+  service db (`pgvector/pgvector:0.8.0-pg17`) — le serveur Supabase est en
+  PostgreSQL 17.6, le client de l'hôte en 16 : passer par le conteneur aligne
+  les versions. L'URL transite par l'environnement du conteneur, jamais en
+  argument visible. `--no-owner --no-privileges` : aucun rôle Supabase importé.
+
+### `docker/db-init/01-restore.sh` — la restauration au premier démarrage
+- **Entrées** : le dump monté en lecture seule (`/dump`).
+- **Sorties** : la base peuplée dans le volume nommé `db_data`.
+- **Ce qui s'y passe** : `CREATE EXTENSION vector` (absente d'un dump limité au
+  schéma), restauration en `--exit-on-error` après avoir retiré de la table des
+  matières l'entrée `SCHEMA public` (déjà présente dans une base neuve), puis
+  **recréation de l'index HNSW** `movie_embeddings_hnsw` supprimé sur Supabase
+  pour cause de quota (chapitre 6) : en local, aucune limite ne s'y oppose.
+
+### `docker-compose.yml` — le service `db`
+- Image épinglée `pgvector/pgvector:0.8.0-pg17`, **aucun port publié**,
+  identifiants `POSTGRES_*` du `.env` fournis uniquement à db et api-donnees.
+- Réseau dédié `db_net` (internal) : seule l'API Données y a une patte —
+  l'API IA ne peut même pas résoudre le nom `db`. `egress_net` est supprimé :
+  la couche Données n'a plus aucune sortie internet.
+- Healthcheck `pg_isready -h 127.0.0.1` : pendant la restauration, le serveur
+  temporaire n'écoute que sur le socket Unix, donc « healthy » seulement une
+  fois la base prête ; `api-donnees` attend cette condition (`depends_on`).
+- Le code applicatif n'a pas changé d'une ligne : `SupabaseFilmRepository`
+  parle du SQL standard et `<=>` (pgvector) — seul `DATABASE_URL` diffère.
+
+**Vu en réel** (2026-10-19) : dump en 40 s ; restauration + index HNSW en 35 s
+(33 961 films, 31 284 embeddings) ; depuis api-ia, `GET /films/41` → Hereditary,
+`/films/41/similar` → voisins cosinus servis par l'index HNSW (`EXPLAIN` :
+*Index Scan using movie_embeddings_hnsw*), id inconnu → 404 ; api-donnees →
+internet : bloqué ; api-ia → db : nom introuvable ; depuis l'hôte, seul le 443
+répond (front HTTPS 200, certificat vérifié contre la CA locale ; login → jeton,
+`/chat` sans jeton → 401).
+
+⚠️ **Anomalie découverte** : `/chat` en cluster renvoie le repli gothique —
+Ollama, sur l'hôte, n'écoute que sur `127.0.0.1:11434` et refuse les connexions
+venues des conteneurs (`host.docker.internal` → *Connection refused*). Le
+cluster n'avait donc jamais servi un récit de bout en bout. Correctif en attente
+d'arbitrage (configuration d'Ollama côté hôte).
 
 *Chapitre suivant : monitoring + CD + Sphinx + Issues (G4).*

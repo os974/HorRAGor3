@@ -2,25 +2,55 @@
 #
 #   navigateur ── https://horragor.localhost ──> traefik ──> frontend
 #   frontend ── https://api.horragor.localhost (TLS vérifié) ──> traefik ──> api-ia
-#   api-ia ── data_net (réseau privé INTERNE, étanche) ──> api-donnees ──> Supabase
+#   api-ia ── data_net (INTERNE, étanche) ──> api-donnees ── db_net (INTERNE) ──> db
 #   api-ia ── host-gateway ──> Ollama (hôte) + Langfuse (hôte:3000) + web (Enquêteur)
 #
-# Ségrégation des secrets : DATABASE_URL n'est fourni QU'À api-donnees ;
-# api-ia ne connaît que DATA_API_URL. Les ${VAR} viennent du .env racine.
+# Ségrégation des secrets : les identifiants Postgres ne sont fournis QU'À db et
+# api-donnees ; api-ia ne connaît que DATA_API_URL. Les ${VAR} viennent du .env.
 #
-# Prérequis : ./scripts/gen_certs.sh (une fois), Ollama et Langfuse sur l'hôte.
+# Prérequis : ./scripts/gen_certs.sh et ./scripts/dump_supabase.sh (une fois),
+# Ollama et Langfuse sur l'hôte.
 
 networks:
   # Le réseau privé étanche du brief : internal → aucun trafic entrant/sortant
-  # hors du cluster ; seuls api-ia et api-donnees s'y parlent.
+  # hors du cluster. La couche Données (db + api-donnees) n'a AUCUNE autre patte.
   data_net:
+    internal: true
+  # Défense en profondeur : la base n'est joignable QUE par l'API Données
+  # (api-ia ne peut même pas tenter une connexion à db:5432).
+  db_net:
     internal: true
   # Traefik ↔ frontend ↔ api-ia (bridge normal : donne aussi l'egress web à api-ia).
   front_net:
-  # Sortie internet d'api-donnees (vers Supabase) — AUCUN port publié pour autant.
-  egress_net:
+
+volumes:
+  db_data:
 
 services:
+  db:
+    # La base de la couche Données, souveraine : restaurée depuis le dump de
+    # Supabase au premier démarrage (docker/db-init/), puis persistée en volume.
+    image: pgvector/pgvector:0.8.0-pg17
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:?POSTGRES_USER manquant dans .env}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD manquant dans .env}
+      POSTGRES_DB: ${POSTGRES_DB:-horragor}
+    volumes:
+      - db_data:/var/lib/postgresql/data
+      - ./docker/db-init:/docker-entrypoint-initdb.d:ro
+      - ./data/db_init:/dump:ro
+    healthcheck:
+      # Via TCP : pendant la restauration, le serveur temporaire n'écoute que
+      # sur le socket Unix — « healthy » seulement une fois la base prête.
+      test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 300s
+    networks:
+      - db_net
+    restart: unless-stopped
+
   traefik:
     # v3 récent obligatoire : Docker Engine ≥ 28 exige l'API 1.44, que les
     # vieux clients Traefik ne négocient pas (erreur « client version 1.24 »).
@@ -55,11 +85,15 @@ services:
       context: .
       dockerfile: docker/api-donnees.Dockerfile
     environment:
-      DATABASE_URL: ${DATABASE_URL} # le SEUL détenteur du secret
+      # Le mot de passe doit être URL-safe (hexadécimal recommandé, cf. .env.example).
+      DATABASE_URL: postgresql+psycopg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB:-horragor}
       LOG_LEVEL: ${LOG_LEVEL:-INFO}
     networks:
       - data_net
-      - egress_net
+      - db_net
+    depends_on:
+      db:
+        condition: service_healthy
     restart: unless-stopped
 
   api-ia:
