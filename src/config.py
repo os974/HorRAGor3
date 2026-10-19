@@ -87,7 +87,8 @@ class Settings(BaseSettings):
     # Ex. http://api-donnees:8100 dans le compose ; vide = accès direct Supabase (dev).
     data_api_url: str = ""
 
-    # --- FAISS (validation de titres, index repris de HorRAGor2) ---
+    # --- FAISS (validation de titres ; index repris de HorRAGor2 ou reconstruit
+    # par `uv run python -m scripts.build_faiss`) ---
     faiss_index_dir: str = "data/faiss_index"
     faiss_score_threshold: float = 0.75
 

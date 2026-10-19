@@ -55,7 +55,7 @@ async def lifespan(_: FastAPI):
     else:
         logger.warning(
             "Index FAISS absent ({}) : validate_film sera indisponible "
-            "(copier celui de HorRAGor2 ou le reconstruire)",
+            "(le reconstruire : uv run python -m scripts.build_faiss)",
             settings.faiss_index_dir,
         )
     yield
