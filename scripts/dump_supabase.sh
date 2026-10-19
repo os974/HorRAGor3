@@ -20,12 +20,19 @@ set +a
 SOURCE_URL="${SOURCE_DATABASE_URL:-${DATABASE_URL:?DATABASE_URL absente du .env}}"
 # libpq ne connaît pas le schéma SQLAlchemy « postgresql+psycopg:// ».
 SOURCE_URL="${SOURCE_URL/postgresql+psycopg:/postgresql:}"
+# Base distante : chiffrement exigé.
+if [[ "$SOURCE_URL" != *sslmode=* ]]; then
+  [[ "$SOURCE_URL" == *\?* ]] && SOURCE_URL+="&sslmode=require" || SOURCE_URL+="?sslmode=require"
+fi
+# Exportée puis transmise par NOM (-e SOURCE_URL) : le mot de passe
+# n'apparaît pas dans les arguments visibles par `ps`.
+export SOURCE_URL
 
 mkdir -p "$OUT_DIR"
 echo "Dump du schéma public vers $OUT_DIR/horragor.dump…"
 docker run --rm \
   --user "$(id -u):$(id -g)" \
-  -e SOURCE_URL="$SOURCE_URL" \
+  -e SOURCE_URL \
   -v "$PWD/$OUT_DIR:/out" \
   "$IMAGE" \
   sh -c 'pg_dump --dbname="$SOURCE_URL" --schema=public --no-owner --no-privileges \

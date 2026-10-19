@@ -17,7 +17,6 @@ from contextlib import asynccontextmanager
 from typing import Annotated
 
 from fastapi import Depends, FastAPI
-from fastapi.middleware.cors import CORSMiddleware
 from loguru import logger
 from prometheus_fastapi_instrumentator import Instrumentator
 
@@ -58,16 +57,9 @@ async def lifespan(_: FastAPI):
     yield
 
 
+# Pas de CORS : le navigateur n'appelle jamais l'API — c'est le serveur
+# Streamlit (httpx, côté conteneur) qui lui parle.
 app = FastAPI(title="HorRAGor3 API", version="0.1.0", lifespan=lifespan)
-
-# CORS : le Front Streamlit vit sur un autre port ; sans cela le navigateur
-# bloquerait ses appels. (Phase G : restreindre à l'URL réelle du Front.)
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
 
 # /metrics Prometheus dès la naissance du service (règle observabilité) :
 # latences, comptes et statuts par route, prêts pour la stack de la Phase G.

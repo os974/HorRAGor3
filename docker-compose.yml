@@ -1,40 +1,99 @@
 # Le cluster HorRAGor3 (épilogue MLOps du brief) — 3 couches isolées :
 #
-#   navigateur ── https://horragor.localhost ──> traefik ──> frontend
-#   frontend ── https://api.horragor.localhost (TLS vérifié) ──> traefik ──> api-ia
+#   navigateur ── https://horragor.localhost (127.0.0.1:443) ──> traefik ──> frontend
+#   frontend ── front_net (INTERNE) ── https://api.horragor.localhost ──> traefik ──> api-ia
 #   api-ia ── data_net (INTERNE, étanche) ──> api-donnees ── db_net (INTERNE) ──> db
-#   api-ia ── host-gateway ──> Ollama (hôte) + Langfuse (hôte:3000) + web (Enquêteur)
+#   api-ia ── ia_net ──> Ollama (hôte, host-gateway) + Langfuse (hôte:3000) + web (Enquêteur)
 #
-# Ségrégation des secrets : les identifiants Postgres ne sont fournis QU'À db et
-# api-donnees ; api-ia ne connaît que DATA_API_URL. Les ${VAR} viennent du .env.
+# Le front n'a AUCUN chemin réseau vers api-ia hors de Traefik : le chiffrement
+# UI → API IA est imposé par la topologie, pas par convention.
+# Secrets : les identifiants Postgres admin restent dans db ; api-donnees n'a
+# qu'un rôle en lecture seule ; api-ia ne connaît que DATA_API_URL.
 #
 # Prérequis : ./scripts/gen_certs.sh et ./scripts/dump_supabase.sh (une fois),
-# Ollama et Langfuse sur l'hôte.
+# Ollama et Langfuse sur l'hôte. Les ${VAR} viennent du .env.
+
+x-hardening: &hardening
+  security_opt:
+    - no-new-privileges:true
+  cap_drop:
+    - ALL
 
 networks:
-  # Le réseau privé étanche du brief : internal → aucun trafic entrant/sortant
-  # hors du cluster. La couche Données (db + api-donnees) n'a AUCUNE autre patte.
+  # Traefik ↔ frontend uniquement. Interne : le front n'a pas d'internet.
+  front_net:
+    internal: true
+  # Traefik ↔ api-ia, avec sortie internet (Enquêteur web, Ollama sur l'hôte).
+  ia_net:
+  # Le réseau privé étanche du brief : api-ia ↔ api-donnees, sans sortie.
   data_net:
     internal: true
-  # Défense en profondeur : la base n'est joignable QUE par l'API Données
-  # (api-ia ne peut même pas tenter une connexion à db:5432).
+  # La base n'est joignable QUE par l'API Données.
   db_net:
     internal: true
-  # Traefik ↔ frontend ↔ api-ia (bridge normal : donne aussi l'egress web à api-ia).
-  front_net:
 
 volumes:
   db_data:
 
 services:
+  traefik:
+    <<: *hardening
+    image: traefik:v3.7.15
+    command:
+      # Routage déclaré en fichier (traefik/dynamic.yml) : pas de socket Docker.
+      - --providers.file.filename=/etc/traefik/dynamic.yml
+      - --entrypoints.websecure.address=:8443
+      - --entrypoints.internal.address=:8082
+      - --ping=true
+      - --ping.entrypoint=internal
+      - --log.level=INFO
+    # Lire la clé du certificat (mode 600, propriétaire hôte) malgré cap_drop.
+    cap_add:
+      - DAC_READ_SEARCH
+    ports:
+      - "127.0.0.1:443:8443" # l'UNIQUE port publié, et seulement sur la boucle locale
+    volumes:
+      - ./traefik/dynamic.yml:/etc/traefik/dynamic.yml:ro
+      - ./certs/cluster.pem:/certs/cluster.pem:ro
+      - ./certs/cluster.key:/certs/cluster.key:ro
+    healthcheck:
+      test:
+        - CMD
+        - traefik
+        - healthcheck
+        - --ping
+        - --ping.entrypoint=internal
+        - --entrypoints.internal.address=:8082
+      interval: 30s
+      timeout: 5s
+      retries: 3
+    networks:
+      front_net:
+        # Le frontend résout api.horragor.localhost → Traefik (seul chemin vers l'IA).
+        aliases:
+          - api.horragor.localhost
+      ia_net:
+    restart: unless-stopped
+
   db:
     # La base de la couche Données, souveraine : restaurée depuis le dump de
     # Supabase au premier démarrage (docker/db-init/), puis persistée en volume.
+    <<: *hardening
     image: pgvector/pgvector:0.8.0-pg17
+    # Le minimum pour que l'entrypoint initialise le volume puis bascule
+    # sur l'utilisateur postgres.
+    cap_add:
+      - CHOWN
+      - DAC_OVERRIDE
+      - FOWNER
+      - SETGID
+      - SETUID
     environment:
       POSTGRES_USER: ${POSTGRES_USER:?POSTGRES_USER manquant dans .env}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD manquant dans .env}
       POSTGRES_DB: ${POSTGRES_DB:-horragor}
+      POSTGRES_RO_USER: ${POSTGRES_RO_USER:-horragor_ro}
+      POSTGRES_RO_PASSWORD: ${POSTGRES_RO_PASSWORD:?POSTGRES_RO_PASSWORD manquant dans .env}
     volumes:
       - db_data:/var/lib/postgresql/data
       - ./docker/db-init:/docker-entrypoint-initdb.d:ro
@@ -51,42 +110,14 @@ services:
       - db_net
     restart: unless-stopped
 
-  traefik:
-    # v3 récent obligatoire : Docker Engine ≥ 28 exige l'API 1.44, que les
-    # vieux clients Traefik ne négocient pas (erreur « client version 1.24 »).
-    image: traefik:v3
-    environment:
-      DOCKER_API_VERSION: "1.44"
-    command:
-      - --providers.docker=true
-      - --providers.docker.exposedbydefault=false
-      # api-ia a deux pattes réseau (data_net + front_net) : on impose à
-      # Traefik de le desservir par front_net, sinon il peut choisir l'IP
-      # du réseau interne qu'il ne peut pas atteindre (504).
-      - --providers.docker.network=horragor3_front_net
-      - --providers.file.filename=/etc/traefik/dynamic.yml
-      - --entrypoints.websecure.address=:443
-      - --log.level=INFO
-    ports:
-      - "443:443" # l'UNIQUE port publié du cluster
-    volumes:
-      - /var/run/docker.sock:/var/run/docker.sock:ro
-      - ./traefik/dynamic.yml:/etc/traefik/dynamic.yml:ro
-      - ./certs:/certs:ro
-    networks:
-      front_net:
-        # Le frontend résout api.horragor.localhost → Traefik (routage interne).
-        aliases:
-          - api.horragor.localhost
-    restart: unless-stopped
-
   api-donnees:
+    <<: *hardening
     build:
       context: .
       dockerfile: docker/api-donnees.Dockerfile
     environment:
-      # Le mot de passe doit être URL-safe (hexadécimal recommandé, cf. .env.example).
-      DATABASE_URL: postgresql+psycopg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB:-horragor}
+      # Rôle en LECTURE SEULE (SELECT, statement_timeout) ; mot de passe URL-safe.
+      DATABASE_URL: postgresql+psycopg://${POSTGRES_RO_USER:-horragor_ro}:${POSTGRES_RO_PASSWORD}@db:5432/${POSTGRES_DB:-horragor}
       LOG_LEVEL: ${LOG_LEVEL:-INFO}
     networks:
       - data_net
@@ -97,18 +128,19 @@ services:
     restart: unless-stopped
 
   api-ia:
+    <<: *hardening
     build:
       context: .
       dockerfile: docker/api-ia.Dockerfile
     environment:
-      DATA_API_URL: http://api-donnees:8100 # jamais DATABASE_URL ici
+      DATA_API_URL: http://api-donnees:8100 # jamais d'identifiants de base ici
       OLLAMA_BASE_URL: http://host.docker.internal:11434
       LANGFUSE_HOST: http://host.docker.internal:3000
       LANGFUSE_PUBLIC_KEY: ${LANGFUSE_PUBLIC_KEY:-}
       LANGFUSE_SECRET_KEY: ${LANGFUSE_SECRET_KEY:-}
-      JWT_SECRET: ${JWT_SECRET}
-      APP_USERNAME: ${APP_USERNAME}
-      APP_PASSWORD: ${APP_PASSWORD}
+      JWT_SECRET: ${JWT_SECRET:?JWT_SECRET manquant dans .env}
+      APP_USERNAME: ${APP_USERNAME:?APP_USERNAME manquant dans .env}
+      APP_PASSWORD: ${APP_PASSWORD:?APP_PASSWORD manquant dans .env}
       TMDB_TOKEN: ${TMDB_TOKEN:-}
       LOG_LEVEL: ${LOG_LEVEL:-INFO}
     volumes:
@@ -116,24 +148,21 @@ services:
     extra_hosts:
       - host.docker.internal:host-gateway # Ollama + Langfuse restent sur l'hôte
     networks:
+      - ia_net
       - data_net
-      - front_net
     depends_on:
-      - api-donnees
-    labels:
-      - traefik.enable=true
-      - traefik.http.routers.api.rule=Host(`api.horragor.localhost`)
-      - traefik.http.routers.api.entrypoints=websecure
-      - traefik.http.routers.api.tls=true
-      - traefik.http.services.api.loadbalancer.server.port=8000
+      api-donnees:
+        condition: service_healthy
     restart: unless-stopped
 
   frontend:
+    <<: *hardening
     build:
       context: .
       dockerfile: docker/frontend.Dockerfile
     environment:
-      API_BASE_URL: https://api.horragor.localhost
+      # 8443 : le port d'écoute de Traefik dans le cluster (443 n'existe que côté hôte).
+      API_BASE_URL: https://api.horragor.localhost:8443
       # httpx vérifie le TLS contre NOTRE autorité locale : chiffré ET authentifié.
       SSL_CERT_FILE: /certs/ca.pem
     volumes:
@@ -141,11 +170,6 @@ services:
     networks:
       - front_net
     depends_on:
-      - api-ia
-    labels:
-      - traefik.enable=true
-      - traefik.http.routers.front.rule=Host(`horragor.localhost`)
-      - traefik.http.routers.front.entrypoints=websecure
-      - traefik.http.routers.front.tls=true
-      - traefik.http.services.front.loadbalancer.server.port=8501
+      api-ia:
+        condition: service_healthy
     restart: unless-stopped

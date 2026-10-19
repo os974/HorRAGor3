@@ -16,10 +16,14 @@ if [[ -f certs/cluster.pem && -f certs/ca.pem ]]; then
   exit 0
 fi
 
-# 1. L'autorité locale.
+# 1. L'autorité locale, contrainte aux noms en *.localhost : même installée
+#    dans un navigateur, elle ne peut signer aucun autre site.
 openssl req -x509 -newkey rsa:2048 -nodes -days 825 \
   -keyout certs/ca.key -out certs/ca.pem \
-  -subj "/CN=HorRAGor3 Local CA" 2>/dev/null
+  -subj "/CN=HorRAGor3 Local CA" \
+  -addext "basicConstraints=critical,CA:TRUE" \
+  -addext "keyUsage=critical,keyCertSign,cRLSign" \
+  -addext "nameConstraints=critical,permitted;DNS:localhost" 2>/dev/null
 
 # 2. Le certificat du cluster, signé par l'autorité.
 openssl req -newkey rsa:2048 -nodes \
