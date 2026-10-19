@@ -57,7 +57,8 @@ class Settings(BaseSettings):
         app_username: Compte de démonstration de l'IHM (secret).
         app_password: Mot de passe du compte démo (secret).
         access_token_minutes: Durée de vie du jeton d'accès (défaut 15 min).
-        refresh_token_days: Durée de vie du jeton de renouvellement (7 j).
+        refresh_token_hours: Durée de vie du jeton de renouvellement (12 h :
+            les jetons vivent dans la session Streamlit, qui meurt avec l'onglet).
         langfuse_public_key: Clé publique Langfuse (secret ; vide = désactivé).
         langfuse_secret_key: Clé secrète Langfuse (secret ; vide = désactivé).
         langfuse_host: URL du serveur Langfuse self-hosted.
@@ -102,7 +103,7 @@ class Settings(BaseSettings):
     app_username: str = ""
     app_password: str = ""
     access_token_minutes: int = 15
-    refresh_token_days: int = 7
+    refresh_token_hours: int = 12
 
     # --- Langfuse (Phase E) : fail-open si clés absentes ---
     langfuse_public_key: str = ""

@@ -12,3 +12,4 @@ certs/
 docs/
 tests/
 data/faiss_index/
+data/db_init/

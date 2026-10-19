@@ -3,15 +3,21 @@
 Mécanique classique à deux jetons :
     - **access token** (courte durée, ~15 min) : présenté en ``Authorization:
       Bearer`` à chaque appel métier (``/chat``) — s'il fuite, il expire vite ;
-    - **refresh token** (longue durée, ~7 j) : sert UNIQUEMENT à obtenir un
-      nouvel access token via ``/auth/refresh`` — jamais envoyé aux routes
-      métier.
+    - **refresh token** (~12 h) : sert UNIQUEMENT à obtenir une paire neuve via
+      ``/auth/refresh`` — jamais envoyé aux routes métier. Rotation à chaque
+      usage, et **révocation** : seul le dernier refresh émis (son ``jti``) est
+      valide ; présenter un ancien refresh trahit un vol et révoque la session.
 
 Un seul compte de démonstration (``APP_USERNAME``/``APP_PASSWORD`` du ``.env``) :
 le brief exige le verrou des échanges, pas une gestion d'utilisateurs.
 Signature HS256 avec ``JWT_SECRET`` (secret, jamais commité).
+
+Le registre des refresh actifs vit en mémoire : l'API tourne en un seul
+processus (un redémarrage impose simplement de se reconnecter).
 """
 
+import hmac
+import uuid
 from datetime import UTC, datetime, timedelta
 from typing import Annotated
 
@@ -28,6 +34,9 @@ router = APIRouter(prefix="/auth", tags=["auth"])
 
 # auto_error=False : on veut renvoyer NOS 401 explicites, pas le 403 par défaut.
 _bearer = HTTPBearer(auto_error=False)
+
+# Sujet → jti du SEUL refresh token actuellement valide.
+_active_refresh: dict[str, str] = {}
 
 
 class LoginRequest(BaseModel):
@@ -66,7 +75,33 @@ class TokenPair(BaseModel):
     token_type: str = "bearer"
 
 
-def _create_token(subject: str, token_type: str, lifetime: timedelta) -> str:
+def _unauthorized(detail: str) -> HTTPException:
+    """Fabrique la 401 standard (en-tête ``WWW-Authenticate: Bearer``).
+
+    Args:
+        detail: Message explicite renvoyé au client.
+
+    Returns:
+        L'exception prête à être levée.
+    """
+    return HTTPException(status_code=401, detail=detail, headers={"WWW-Authenticate": "Bearer"})
+
+
+def _require_configured() -> None:
+    """Vérifie que l'auth est configurée (secret + compte démo).
+
+    Raises:
+        HTTPException: 503 si ``JWT_SECRET``/``APP_USERNAME``/``APP_PASSWORD``
+            manquent — jamais de 500 sur une clé de signature vide.
+    """
+    if not (settings.jwt_secret and settings.app_username and settings.app_password):
+        logger.error("Auth non configurée : JWT_SECRET/APP_USERNAME/APP_PASSWORD manquants")
+        raise HTTPException(status_code=503, detail="authentification non configurée")
+
+
+def _create_token(
+    subject: str, token_type: str, lifetime: timedelta, jti: str | None = None
+) -> str:
     """Fabrique un JWT signé.
 
     Args:
@@ -74,53 +109,49 @@ def _create_token(subject: str, token_type: str, lifetime: timedelta) -> str:
         token_type: "access" ou "refresh" — vérifié à la validation pour
             interdire d'utiliser un refresh comme access (et inversement).
         lifetime: Durée de validité.
+        jti: Identifiant unique du jeton (refresh : sert à la révocation).
 
     Returns:
         Le JWT encodé (HS256).
     """
     now = datetime.now(UTC)
     payload = {"sub": subject, "type": token_type, "iat": now, "exp": now + lifetime}
+    if jti:
+        payload["jti"] = jti
     return jwt.encode(payload, settings.jwt_secret, algorithm=_ALGORITHM)
 
 
-def _decode_token(token: str, expected_type: str) -> str:
-    """Valide un JWT et renvoie son sujet.
+def _decode_token(token: str, expected_type: str) -> dict:
+    """Valide un JWT et renvoie ses claims.
 
     Args:
         token: Le JWT présenté.
         expected_type: Le type attendu ("access" ou "refresh").
 
     Returns:
-        Le username porté par le jeton.
+        Les claims du jeton (``sub`` garanti ; ``jti`` pour un refresh).
 
     Raises:
-        HTTPException: 401 si le jeton est invalide, expiré ou du mauvais type.
+        HTTPException: 503 si l'auth n'est pas configurée ; 401 si le jeton
+            est invalide, expiré, incomplet ou du mauvais type.
     """
+    _require_configured()
+    required = ["exp", "sub", "type"] + (["jti"] if expected_type == "refresh" else [])
     try:
-        payload = jwt.decode(token, settings.jwt_secret, algorithms=[_ALGORITHM])
-    except jwt.ExpiredSignatureError:
-        raise HTTPException(
-            status_code=401,
-            detail="jeton expiré",
-            headers={"WWW-Authenticate": "Bearer"},
-        ) from None
-    except jwt.InvalidTokenError:
-        raise HTTPException(
-            status_code=401,
-            detail="jeton invalide",
-            headers={"WWW-Authenticate": "Bearer"},
-        ) from None
-    if payload.get("type") != expected_type:
-        raise HTTPException(
-            status_code=401,
-            detail=f"jeton de type inattendu (attendu : {expected_type})",
-            headers={"WWW-Authenticate": "Bearer"},
+        payload = jwt.decode(
+            token, settings.jwt_secret, algorithms=[_ALGORITHM], options={"require": required}
         )
-    return str(payload.get("sub", ""))
+    except jwt.ExpiredSignatureError:
+        raise _unauthorized("jeton expiré") from None
+    except jwt.InvalidTokenError:
+        raise _unauthorized("jeton invalide") from None
+    if payload["type"] != expected_type:
+        raise _unauthorized(f"jeton de type inattendu (attendu : {expected_type})")
+    return payload
 
 
 def _issue_pair(subject: str) -> TokenPair:
-    """Émet une paire access + refresh pour un sujet authentifié.
+    """Émet une paire access + refresh et enregistre le refresh comme seul actif.
 
     Args:
         subject: Le username authentifié.
@@ -128,12 +159,14 @@ def _issue_pair(subject: str) -> TokenPair:
     Returns:
         La paire de jetons neufs.
     """
+    jti = uuid.uuid4().hex
+    _active_refresh[subject] = jti
     return TokenPair(
         access_token=_create_token(
             subject, "access", timedelta(minutes=settings.access_token_minutes)
         ),
         refresh_token=_create_token(
-            subject, "refresh", timedelta(days=settings.refresh_token_days)
+            subject, "refresh", timedelta(hours=settings.refresh_token_hours), jti=jti
         ),
     )
 
@@ -152,10 +185,11 @@ async def login(req: LoginRequest) -> TokenPair:
         HTTPException: 503 si l'auth n'est pas configurée ; 401 si les
             identifiants sont invalides.
     """
-    if not (settings.jwt_secret and settings.app_username and settings.app_password):
-        logger.error("Auth non configurée : JWT_SECRET/APP_USERNAME/APP_PASSWORD manquants")
-        raise HTTPException(status_code=503, detail="authentification non configurée")
-    if not (req.username == settings.app_username and req.password == settings.app_password):
+    _require_configured()
+    # compare_digest : temps constant, pas d'indice de longueur commune.
+    user_ok = hmac.compare_digest(req.username.encode(), settings.app_username.encode())
+    password_ok = hmac.compare_digest(req.password.encode(), settings.app_password.encode())
+    if not (user_ok and password_ok):
         logger.warning("Tentative de connexion refusée pour {!r}", req.username)
         raise HTTPException(status_code=401, detail="identifiants invalides")
     logger.info("Connexion réussie : {}", req.username)
@@ -164,10 +198,11 @@ async def login(req: LoginRequest) -> TokenPair:
 
 @router.post("/refresh", response_model=TokenPair)
 async def refresh(req: RefreshRequest) -> TokenPair:
-    """Renouvelle la paire à partir d'un refresh token valide.
+    """Renouvelle la paire à partir du refresh token actif.
 
-    Rotation complète : un nouveau refresh est émis à chaque appel (limite la
-    fenêtre d'exploitation d'un jeton volé).
+    Rotation complète : chaque usage invalide le refresh présenté. Un refresh
+    déjà consommé qui revient signale un vol : la session du sujet est
+    révoquée (y compris le refresh légitime le plus récent).
 
     Args:
         req: Le refresh token courant.
@@ -176,9 +211,15 @@ async def refresh(req: RefreshRequest) -> TokenPair:
         Une paire de jetons neufs.
 
     Raises:
-        HTTPException: 401 si le refresh est invalide, expiré ou d'un autre type.
+        HTTPException: 401 si le refresh est invalide, expiré, d'un autre type
+            ou révoqué ; 503 si l'auth n'est pas configurée.
     """
-    subject = _decode_token(req.refresh_token, expected_type="refresh")
+    claims = _decode_token(req.refresh_token, expected_type="refresh")
+    subject = claims["sub"]
+    if _active_refresh.get(subject) != claims["jti"]:
+        _active_refresh.pop(subject, None)
+        logger.warning("Refresh déjà consommé ou inconnu pour {} : session révoquée", subject)
+        raise _unauthorized("jeton révoqué")
     logger.info("Jetons renouvelés pour {}", subject)
     return _issue_pair(subject)
 
@@ -198,9 +239,5 @@ async def require_access(
         HTTPException: 401 si l'en-tête manque ou si le jeton est invalide.
     """
     if credentials is None:
-        raise HTTPException(
-            status_code=401,
-            detail="jeton d'accès requis",
-            headers={"WWW-Authenticate": "Bearer"},
-        )
-    return _decode_token(credentials.credentials, expected_type="access")
+        raise _unauthorized("jeton d'accès requis")
+    return _decode_token(credentials.credentials, expected_type="access")["sub"]

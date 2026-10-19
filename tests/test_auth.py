@@ -22,7 +22,7 @@ class FakeEngine:
 @pytest.fixture
 def client(monkeypatch):
     """TestClient avec auth configurée (compte démo) et moteur factice."""
-    monkeypatch.setattr(settings, "jwt_secret", "secret-de-test")
+    monkeypatch.setattr(settings, "jwt_secret", "secret-de-test-assez-long-pour-hs256")
     monkeypatch.setattr(settings, "app_username", "demo")
     monkeypatch.setattr(settings, "app_password", "abracadabra")
     monkeypatch.setattr(main.TitleIndex, "exists", classmethod(lambda cls, d=None: False))
@@ -113,6 +113,38 @@ def test_un_access_ne_passe_pas_en_refresh(client):
     tokens = _login(client)
     resp = client.post("/auth/refresh", json={"refresh_token": tokens["access_token"]})
     assert resp.status_code == 401
+
+
+def test_refresh_consomme_puis_rejoue_revoque_la_session(client):
+    """Rotation + révocation : rejouer un refresh déjà utilisé (vol présumé) → 401,
+    et le refresh légitime le plus récent est révoqué avec lui."""
+    tokens = _login(client)
+    first = client.post("/auth/refresh", json={"refresh_token": tokens["refresh_token"]})
+    assert first.status_code == 200
+    replay = client.post("/auth/refresh", json={"refresh_token": tokens["refresh_token"]})
+    assert replay.status_code == 401
+    assert "révoqué" in replay.json()["detail"]
+    latest = client.post("/auth/refresh", json={"refresh_token": first.json()["refresh_token"]})
+    assert latest.status_code == 401
+
+
+def test_refresh_sans_jti_refuse(client):
+    """Un refresh forgé sans identifiant unique (jti) est refusé."""
+    forged = _create_token("demo", "refresh", timedelta(hours=1))
+    resp = client.post("/auth/refresh", json={"refresh_token": forged})
+    assert resp.status_code == 401
+
+
+def test_jeton_sur_api_non_configuree(client, monkeypatch):
+    """Secret absent au moment de valider un jeton → 503 propre, jamais de 500."""
+    tokens = _login(client)
+    monkeypatch.setattr(settings, "jwt_secret", "")
+    resp = client.post(
+        "/chat",
+        json={"message": "bouh"},
+        headers={"Authorization": f"Bearer {tokens['access_token']}"},
+    )
+    assert resp.status_code == 503
 
 
 def test_jeton_expire(client):
