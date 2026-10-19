@@ -60,10 +60,8 @@ testpaths = ["tests"]
 pythonpath = ["."]
 
 [tool.coverage.run]
-# « Les deux API » du brief : la couche IA (src) ET la couche Données (services).
-source = ["src", "services"]
-# L'UI Streamlit sera testée en Phase G (st.testing.AppTest) ; hors mesure d'ici là.
-omit = ["app_frontend.py"]
+# Le périmètre du brief : « les deux API et l'UI ».
+source = ["src", "services", "app_frontend"]
 
 [tool.coverage.report]
 # Exigence de l'épilogue MLOps du brief : couverture minimale de 80 %.

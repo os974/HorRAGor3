@@ -45,12 +45,18 @@ def test_get_credits_sans_realisateur(monkeypatch):
 
 
 def test_setup_logging_intercepte_la_stdlib():
-    """Les logs stdlib (uvicorn...) sont re-routés vers Loguru."""
+    """Les logs stdlib sont re-routés vers Loguru via le handler racine.
+
+    Logger dédié plutôt que "uvicorn.error" : les tests AppTest (Streamlit)
+    posent leur propre handler sur les loggers existants et coupent leur
+    propagation — pollution de test sans effet en production (front et API
+    sont des processus séparés).
+    """
     setup_logging()
     captured: list[str] = []
     handler_id = logger.add(lambda message: captured.append(str(message)), level="WARNING")
     try:
-        logging.getLogger("uvicorn.error").warning("ping-stdlib")
+        logging.getLogger("horragor.test-intercept").warning("ping-stdlib")
     finally:
         logger.remove(handler_id)
     assert any("ping-stdlib" in line for line in captured)

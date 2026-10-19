@@ -42,7 +42,20 @@ uv run uvicorn src.main:app --reload
 uv run streamlit run app_frontend.py
 ```
 
-Endpoints : `GET /health`, `GET /metrics` (Prometheus), `POST /chat`.
+Endpoints : `GET /health`, `GET /metrics` (Prometheus), `POST /auth/login`, `POST /auth/refresh`, `POST /chat` (JWT requis).
+
+## Lancement en cluster (Docker)
+
+```bash
+./scripts/gen_certs.sh     # une fois : CA locale + certificat TLS
+docker compose up -d --build
+```
+
+Puis ouvre **https://horragor.localhost** (accepte le certificat de la CA locale,
+ou importe `certs/ca.pem` dans le navigateur) et connecte-toi avec
+`APP_USERNAME`/`APP_PASSWORD` du `.env`. Architecture : Traefik (443, seul port
+publié) → Streamlit → API IA (JWT) → réseau privé étanche → API Données → Supabase.
+Ollama et Langfuse restent sur l'hôte.
 
 ## Tests
 
@@ -61,4 +74,12 @@ La CI GitHub Actions rejoue exactement ces commandes à chaque push/PR sur `main
 - [x] Phase D — API FastAPI (/health, /metrics, /chat) + front Streamlit (parcours des agents)
 - [x] Phase E — Monitoring Langfuse (self-hosted Docker, CallbackHandler v3 fail-open, traces par session)
 - [x] Phase F — Tests (83 tests hermétiques, 92 % de couverture) + CI GitHub Actions
-- [ ] Phase G — Épilogue MLOps (Docker, JWT, Prometheus/Grafana/Uptime Kuma, Sphinx)
+- [ ] Phase G — Épilogue MLOps
+  - [x] G1 — API Données dédiée (la base encapsulée, réseau privé)
+  - [x] G2 — Authentification par Refresh Tokens (JWT access/refresh)
+  - [x] G3 — Cluster Docker 3 couches (Traefik + TLS vérifié, réseau interne étanche)
+  - [ ] BDD conteneurisée (Postgres + pgvector dans le cluster)
+  - [ ] Monitoring 360° (Langfuse intégré, Prometheus, Grafana, Uptime Kuma)
+  - [ ] Documentation Sphinx (2 API, schémas relationnels, carte du graphe)
+  - [ ] CD (images GHCR + doc sur GitHub Pages)
+  - [ ] GitHub Issues (un ticket par anomalie)

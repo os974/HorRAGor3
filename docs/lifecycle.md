@@ -365,6 +365,25 @@ directement par la couche IA.
 Prometheus** : les compteurs `http_requests_total{handler="/films/..."}` de
 l'API Données ont enregistré les requêtes émises par le graphe.
 
+### ⚠️ Incident — quota Supabase saturé (2026-09-03)
+
+Le plan gratuit Supabase (500 Mo) a débordé brutalement (502 Mo) sans aucun
+changement côté HorRAGor3 — le repository ne fait que des `SELECT`, les tests
+sont hermétiques, la CI n'avait pas tourné. Cause réelle, trouvée par
+diagnostic SQL (`pg_stat_user_tables`, `pg_indexes`) : **le projet Supabase
+est partagé avec HorRAGor2** (même `DATABASE_URL`), et l'index pgvector
+`movie_embeddings_hnsw` construit par `HorRAGor2/build_embeddings.py`
+(768 dimensions, ~34k films) pesait **256 Mo à lui seul** — plus que la
+donnée brute elle-même (437 Mo au total pour `movie_embeddings` sur 502 Mo de
+base, soit 87 %). Correctif appliqué : `DROP INDEX CONCURRENTLY
+movie_embeddings_hnsw` — aucune donnée touchée, `recommend_similar` reste
+fonctionnel (scan séquentiel, non mesurable à cette échelle). Base repassée à
+245 Mo. Point de vigilance pour la suite : un futur `uv run
+horragor-reset-data` côté HorRAGor2 recréera cet index HNSW et remplira la
+base à nouveau — à éviter sur ce plan gratuit, ou reconstruire l'index avec des
+paramètres plus légers (`m`/`ef_construction` réduits) si la perf de
+`recommend_similar` devient un jour un vrai problème.
+
 ---
 
 ## Chapitre 7 — Le verrou JWT access/refresh (Phase G2)
@@ -399,5 +418,48 @@ login → paire de jetons ; `/chat` avec Bearer → 200 et récit complet.
 
 ---
 
-*Chapitres suivants : conteneurisation + Traefik (G3), monitoring + Sphinx +
-Issues (G4).*
+## Chapitre 8 — Le cluster Docker (Phase G3)
+
+Le voyage d'une requête traverse désormais des conteneurs isolés :
+
+```
+navigateur ── https://horragor.localhost ──> traefik (443, SEUL port publié)
+   ├──> frontend (Streamlit, conteneur isolé)
+   │       │ https://api.horragor.localhost (TLS VÉRIFIÉ contre notre CA)
+   │       ▼
+   └──> api-ia (JWT) ──data_net (internal, étanche)──> api-donnees ──> Supabase
+              └──host-gateway──> Ollama (hôte) · Langfuse (hôte:3000) · web
+```
+
+### `scripts/gen_certs.sh` + `traefik/`
+- **Entrées** : openssl (une fois).
+- **Sorties** : `certs/` (gitignoré) — une CA locale + le certificat du
+  cluster (SAN `horragor.localhost`, `api.horragor.localhost`), servi par
+  Traefik (`traefik/dynamic.yml`).
+- **Ce qui s'y passe** : la « communication chiffrée » du brief, sans
+  compromis : le front vérifie le certificat contre la CA montée
+  (`SSL_CERT_FILE=/certs/ca.pem`, honoré nativement par httpx) — pas de
+  `verify=False`.
+
+### `docker-compose.yml` — la topologie du cluster
+- **Entrées** : le `.env` racine (substitution des `${VAR}`).
+- **Sorties** : 4 services — traefik, frontend, api-ia, api-donnees.
+- **Ce qui s'y passe** : `data_net` est **internal** (le réseau privé étanche
+  du brief : api-donnees n'a AUCUN port publié, seul api-ia l'atteint) ;
+  api-donnees possède une seconde patte réseau pour joindre Supabase ;
+  **ségrégation des secrets** : `DATABASE_URL` n'est fourni qu'à api-donnees,
+  api-ia ne reçoit que `DATA_API_URL` ; Ollama et Langfuse restent sur l'hôte
+  (`host-gateway`) ; l'index FAISS est monté en volume RO (jamais dans
+  l'image) ; Traefik résout `api.horragor.localhost` en interne (alias
+  réseau) et route le navigateur vers le front. Chaque Dockerfile embarque
+  un `HEALTHCHECK` (sondes Docker + Uptime Kuma).
+
+### Les tests de l'UI (`tests/test_frontend.py`)
+- `st.testing.AppTest` pilote le vrai script Streamlit, httpx mocké : porte
+  close sans session, login réussi/refusé, chat complet (récit + parcours +
+  sources), déconnexion. `app_frontend.py` entre dans la couverture —
+  l'exigence « les deux API **et l'UI** » est complète.
+
+---
+
+*Chapitre suivant : monitoring + CD + Sphinx + Issues (G4).*

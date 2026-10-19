@@ -1,0 +1,117 @@
+# Le cluster HorRAGor3 (épilogue MLOps du brief) — 3 couches isolées :
+#
+#   navigateur ── https://horragor.localhost ──> traefik ──> frontend
+#   frontend ── https://api.horragor.localhost (TLS vérifié) ──> traefik ──> api-ia
+#   api-ia ── data_net (réseau privé INTERNE, étanche) ──> api-donnees ──> Supabase
+#   api-ia ── host-gateway ──> Ollama (hôte) + Langfuse (hôte:3000) + web (Enquêteur)
+#
+# Ségrégation des secrets : DATABASE_URL n'est fourni QU'À api-donnees ;
+# api-ia ne connaît que DATA_API_URL. Les ${VAR} viennent du .env racine.
+#
+# Prérequis : ./scripts/gen_certs.sh (une fois), Ollama et Langfuse sur l'hôte.
+
+networks:
+  # Le réseau privé étanche du brief : internal → aucun trafic entrant/sortant
+  # hors du cluster ; seuls api-ia et api-donnees s'y parlent.
+  data_net:
+    internal: true
+  # Traefik ↔ frontend ↔ api-ia (bridge normal : donne aussi l'egress web à api-ia).
+  front_net:
+  # Sortie internet d'api-donnees (vers Supabase) — AUCUN port publié pour autant.
+  egress_net:
+
+services:
+  traefik:
+    # v3 récent obligatoire : Docker Engine ≥ 28 exige l'API 1.44, que les
+    # vieux clients Traefik ne négocient pas (erreur « client version 1.24 »).
+    image: traefik:v3
+    environment:
+      DOCKER_API_VERSION: "1.44"
+    command:
+      - --providers.docker=true
+      - --providers.docker.exposedbydefault=false
+      # api-ia a deux pattes réseau (data_net + front_net) : on impose à
+      # Traefik de le desservir par front_net, sinon il peut choisir l'IP
+      # du réseau interne qu'il ne peut pas atteindre (504).
+      - --providers.docker.network=horragor3_front_net
+      - --providers.file.filename=/etc/traefik/dynamic.yml
+      - --entrypoints.websecure.address=:443
+      - --log.level=INFO
+    ports:
+      - "443:443" # l'UNIQUE port publié du cluster
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - ./traefik/dynamic.yml:/etc/traefik/dynamic.yml:ro
+      - ./certs:/certs:ro
+    networks:
+      front_net:
+        # Le frontend résout api.horragor.localhost → Traefik (routage interne).
+        aliases:
+          - api.horragor.localhost
+    restart: unless-stopped
+
+  api-donnees:
+    build:
+      context: .
+      dockerfile: docker/api-donnees.Dockerfile
+    environment:
+      DATABASE_URL: ${DATABASE_URL} # le SEUL détenteur du secret
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+    networks:
+      - data_net
+      - egress_net
+    restart: unless-stopped
+
+  api-ia:
+    build:
+      context: .
+      dockerfile: docker/api-ia.Dockerfile
+    environment:
+      DATA_API_URL: http://api-donnees:8100 # jamais DATABASE_URL ici
+      OLLAMA_BASE_URL: http://host.docker.internal:11434
+      LANGFUSE_HOST: http://host.docker.internal:3000
+      LANGFUSE_PUBLIC_KEY: ${LANGFUSE_PUBLIC_KEY:-}
+      LANGFUSE_SECRET_KEY: ${LANGFUSE_SECRET_KEY:-}
+      JWT_SECRET: ${JWT_SECRET}
+      APP_USERNAME: ${APP_USERNAME}
+      APP_PASSWORD: ${APP_PASSWORD}
+      TMDB_TOKEN: ${TMDB_TOKEN:-}
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+    volumes:
+      - ./data/faiss_index:/app/data/faiss_index:ro # l'index, jamais dans l'image
+    extra_hosts:
+      - host.docker.internal:host-gateway # Ollama + Langfuse restent sur l'hôte
+    networks:
+      - data_net
+      - front_net
+    depends_on:
+      - api-donnees
+    labels:
+      - traefik.enable=true
+      - traefik.http.routers.api.rule=Host(`api.horragor.localhost`)
+      - traefik.http.routers.api.entrypoints=websecure
+      - traefik.http.routers.api.tls=true
+      - traefik.http.services.api.loadbalancer.server.port=8000
+    restart: unless-stopped
+
+  frontend:
+    build:
+      context: .
+      dockerfile: docker/frontend.Dockerfile
+    environment:
+      API_BASE_URL: https://api.horragor.localhost
+      # httpx vérifie le TLS contre NOTRE autorité locale : chiffré ET authentifié.
+      SSL_CERT_FILE: /certs/ca.pem
+    volumes:
+      - ./certs/ca.pem:/certs/ca.pem:ro
+    networks:
+      - front_net
+    depends_on:
+      - api-ia
+    labels:
+      - traefik.enable=true
+      - traefik.http.routers.front.rule=Host(`horragor.localhost`)
+      - traefik.http.routers.front.entrypoints=websecure
+      - traefik.http.routers.front.tls=true
+      - traefik.http.services.front.loadbalancer.server.port=8501
+    restart: unless-stopped
