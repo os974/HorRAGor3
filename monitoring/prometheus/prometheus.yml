@@ -1,0 +1,28 @@
+# Prometheus : la télémétrie des 3 composants du brief.
+#   - api-ia et api-donnees : /metrics (prometheus-fastapi-instrumentator) ;
+#   - Traefik : ses métriques par service couvrent la couche Présentation
+#     (Streamlit n'expose pas de /metrics : on mesure le trafic qui la sert).
+# Les cibles sont jointes par les réseaux privés du cluster (aucune n'est publique).
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+
+scrape_configs:
+  - job_name: api-ia
+    static_configs:
+      - targets: ["api-ia:8000"]
+        labels: { couche: intelligence }
+
+  - job_name: api-donnees
+    static_configs:
+      - targets: ["api-donnees:8100"]
+        labels: { couche: donnees }
+
+  - job_name: traefik
+    static_configs:
+      - targets: ["traefik:8082"]
+        labels: { couche: presentation }
+
+  - job_name: prometheus
+    static_configs:
+      - targets: ["localhost:9090"]

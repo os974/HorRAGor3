@@ -1,0 +1,10 @@
+# Fournisseur de dashboards : tout JSON de ce dossier est chargé au démarrage.
+apiVersion: 1
+providers:
+  - name: horragor3
+    folder: HorRAGor3
+    type: file
+    disableDeletion: true
+    allowUiUpdates: false
+    options:
+      path: /etc/grafana/provisioning/dashboards
