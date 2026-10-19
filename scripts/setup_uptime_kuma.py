@@ -35,6 +35,14 @@ MONITORS: list[tuple[str, MonitorType, str, str | None]] = [
     ),
     ("Présentation — Streamlit", MonitorType.HTTP, "http://frontend:8501/_stcore/health", None),
     ("Intelligence — API IA", MonitorType.HTTP, "http://api-ia:8000/health", None),
+    # Le LLM de l'hôte, par le même chemin qu'api-ia : sans lui, /health reste
+    # vert mais chaque récit tombe sur la réponse de repli.
+    (
+        "Intelligence — Ollama (via relais)",
+        MonitorType.HTTP,
+        "http://host.docker.internal:11434/api/version",
+        None,
+    ),
     ("Données — API Données", MonitorType.HTTP, "http://api-donnees:8100/health", None),
     (
         "Données — chaîne API → Postgres",
