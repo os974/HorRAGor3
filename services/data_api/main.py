@@ -51,7 +51,7 @@ def get_repository() -> FilmRepository:
     return _repository()
 
 
-app = FastAPI(title="HorRAGor3 — API Données", version="0.1.0")
+app = FastAPI(title="HorRAGor3 — API Données", version="1.0.0")
 
 # /metrics dès la naissance du service (règle observabilité, cible Prometheus).
 Instrumentator().instrument(app).expose(app)

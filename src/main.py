@@ -63,7 +63,7 @@ async def lifespan(_: FastAPI):
 
 # Pas de CORS : le navigateur n'appelle jamais l'API — c'est le serveur
 # Streamlit (httpx, côté conteneur) qui lui parle.
-app = FastAPI(title="HorRAGor3 API", version="0.1.0", lifespan=lifespan)
+app = FastAPI(title="HorRAGor3 API", version="1.0.0", lifespan=lifespan)
 
 # /metrics Prometheus dès la naissance du service (règle observabilité) :
 # latences, comptes et statuts par route, prêts pour la stack de la Phase G.

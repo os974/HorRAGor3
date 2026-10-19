@@ -1,7 +1,8 @@
 [project]
 name = "horragor3"
-version = "0.1.0"
+version = "1.0.0"
 description = "HorRAGor BOT Partie 3 — système multi-agent peer-to-peer (RAG, Scraper, Narration) sous LangGraph"
+readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
     # --- Orchestration multi-agent ---
@@ -28,9 +29,15 @@ dependencies = [
     "langfuse>=3,<4",
     "loguru>=0.7",
     "prometheus-fastapi-instrumentator>=7",
+    # Méta-paquet requis par l'intégration LangChain du SDK Langfuse v3.
     "langchain>=1.3.12",
+    # --- Sécurité : Refresh Tokens JWT entre l'IHM et l'API IA (épilogue) ---
     "pyjwt>=2.13.0",
 ]
+
+[project.urls]
+Repository = "https://github.com/os974/HorRAGor3"
+Documentation = "https://os974.github.io/HorRAGor3/"
 
 [dependency-groups]
 dev = [

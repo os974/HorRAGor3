@@ -33,9 +33,8 @@ class Settings(BaseSettings):
         tmdb_token: Token TMDB v4 pour enrichir réalisateur/casting (secret,
             optionnel — si vide, l'enrichissement est ignoré sans erreur).
         tmdb_base_url: Base de l'API TMDB.
-        api_host: Hôte d'écoute du serveur FastAPI.
-        api_port: Port d'écoute du serveur FastAPI.
-        api_base_url: URL de l'API telle que vue par le Front Streamlit.
+        api_base_url: URL de l'API telle que vue par le Front Streamlit (le
+            port d'écoute se choisit sur la ligne de commande d'uvicorn).
         ollama_base_url: Instance Ollama locale (LLM + embeddings).
         llm_model: LLM des agents (tool-calling). ``qwen2.5:7b`` : tool_calls
             structurés fiables sur Ollama (validé sur HorRAGor2).
@@ -48,7 +47,6 @@ class Settings(BaseSettings):
         data_api_url: URL de l'API Données du cluster. Si définie, la couche IA
             passe par HttpFilmRepository (jamais d'accès direct à la base —
             exigence de l'épilogue) ; vide = accès direct Supabase (mode dev).
-        titles_db_path: Repli hors-ligne pour les titres : SQLite de HorRAGor1.
         faiss_index_dir: Dossier de persistance de l'index FAISS (gitignoré),
             ``data/faiss_index`` conformément à l'arborescence du brief.
         faiss_score_threshold: Seuil cosinus sous lequel un titre est inconnu.
@@ -76,8 +74,6 @@ class Settings(BaseSettings):
     tmdb_base_url: str = "https://api.themoviedb.org/3"
 
     # --- API ---
-    api_host: str = "127.0.0.1"
-    api_port: int = 8000
     api_base_url: str = "http://127.0.0.1:8000"
 
     # --- Modèles : stack 100 % locale via Ollama (aucune clé API) ---
@@ -92,7 +88,6 @@ class Settings(BaseSettings):
     data_api_url: str = ""
 
     # --- FAISS (validation de titres, index repris de HorRAGor2) ---
-    titles_db_path: str = "../HorRAGor1/data/horragor.db"
     faiss_index_dir: str = "data/faiss_index"
     faiss_score_threshold: float = 0.75
 
