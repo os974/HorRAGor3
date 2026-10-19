@@ -3,7 +3,13 @@
 Règle d'or LangGraph (brief) : chaque nœud est une fonction pure qui prend
 l'état actuel (``state: AgentState``) en paramètre unique et retourne un dict
 de modifications à fusionner dans le State. **Les nœuds ne savent jamais qui a
-travaillé avant eux ni qui prendra la suite** — c'est le rôle des routeurs.
+travaillé avant eux ni qui prendra la suite** — c'est le rôle des routeurs,
+qui portent aussi le jugement « la récolte suffit-elle ? » (``router.py``).
+
+Instrumentation centralisée (règle du plan) : aucun log métier ici. Le
+parcours est tracé par ``trace.record`` (affiché dans le Front) et par les
+callbacks Langfuse passés à l'invoke ; le résumé Loguru du run est écrit par
+le moteur (``src/engine.py``).
 
 C'est ici qu'on configure le comportement de chaque agent : on injecte les
 ``SystemMessage`` spécifiques (prompt du Chercheur, de l'Enquêteur, de
@@ -18,7 +24,6 @@ import json
 
 from langchain_core.messages import BaseMessage, HumanMessage, SystemMessage, ToolMessage
 from langchain_ollama import ChatOllama
-from loguru import logger
 
 from src import trace
 from src.config import settings
@@ -118,9 +123,10 @@ def _writer_llm() -> ChatOllama:
 def harvest_facts(messages: list[BaseMessage]) -> list[str]:
     """Extrait les résultats d'outils ayant trouvé des données.
 
-    C'est le mécanisme déterministe du jugement de récolte : les outils
-    marquent leurs retours JSON d'un champ ``"found"`` ; on ne garde que les
-    contenus où il vaut true. Zéro LLM dans la boucle de décision.
+    C'est le mécanisme déterministe de la récolte : les outils marquent leurs
+    retours JSON d'un champ ``"found"`` ; on ne garde que les contenus où il
+    vaut true. Le routeur juge ensuite si cette récolte suffit — zéro LLM
+    dans la boucle de décision.
 
     Args:
         messages: Un canal de messages d'agent (rag ou scraper).
@@ -133,42 +139,6 @@ def harvest_facts(messages: list[BaseMessage]) -> list[str]:
         for m in messages
         if isinstance(m, ToolMessage) and '"found": true' in str(m.content)
     ]
-
-
-# Indices (déterministes) d'une demande d'informations que la base locale ne
-# possède PAS : elle stocke métadonnées et synopsis, jamais les coulisses.
-# Une question qui contient l'un de ces mots exige l'Enquêteur du Web, même
-# si le film est trouvé localement.
-_WEB_ONLY_HINTS = (
-    "anecdote",
-    "coulisse",
-    "tournage",
-    "making of",
-    "making-of",
-    "behind the scenes",
-    "trivia",
-    "secret",
-    "réception",
-    "interview",
-)
-
-
-def wants_web_details(question: str) -> bool:
-    """Détecte une demande d'informations hors du périmètre de la base locale.
-
-    La base (HorRAGor1) contient métadonnées et synopsis — pas les anecdotes,
-    coulisses de tournage ou la réception critique. Pour ces demandes, la
-    récolte locale n'est JAMAIS suffisante : l'Enquêteur doit partir, même si
-    le film est connu. Détection par mots-clés : déterministe et testable.
-
-    Args:
-        question: La question brute de l'utilisateur.
-
-    Returns:
-        True si la question réclame des informations que seul le web possède.
-    """
-    q = question.lower()
-    return any(hint in q for hint in _WEB_ONLY_HINTS)
 
 
 def _first_visit(state: AgentState, node: str) -> bool:
@@ -195,15 +165,15 @@ def rag_node(state: AgentState) -> dict:
 
     Micro-boucle : tant que le LLM demande des outils, le routeur renvoie vers
     ``rag_tools`` puis ici. Quand il conclut (plus de tool_calls), le nœud fige
-    sa récolte : ``lore`` (faits bruts des outils) et ``is_complete`` (jugement
-    déterministe lu ensuite par ``should_scrape_or_narrate``).
+    sa récolte dans ``lore`` (faits bruts des outils ayant trouvé des
+    données). Il ne juge pas cette récolte : c'est le rôle du routeur.
 
     Args:
         state: L'état courant (``question`` requis).
 
     Returns:
-        Les modifications à fusionner : ``rag_messages`` toujours ; ``lore``,
-        ``is_complete`` en fin de fouille ; ``path`` à la première visite.
+        Les modifications à fusionner : ``rag_messages`` toujours ; ``lore``
+        en fin de fouille ; ``path`` à la première visite.
     """
     llm = _worker_llm().bind_tools(RAG_TOOLS)
     history = list(state.get("rag_messages") or [])
@@ -217,27 +187,10 @@ def rag_node(state: AgentState) -> dict:
     if _first_visit(state, "rag"):
         out["path"] = ["rag"]
     if not getattr(response, "tool_calls", None):
-        # Fin de fouille : le nœud juge sa récolte (le routeur ne fera qu'aiguiller).
-        # Deux critères, tous deux déterministes : des faits ont été trouvés,
-        # ET la question ne réclame pas d'infos hors du périmètre local
-        # (anecdotes, coulisses... → l'Enquêteur part même si le film est connu).
+        # Fin de fouille : le nœud fige sa récolte ; le routeur la jugera.
         facts = harvest_facts(list(state.get("rag_messages") or []))
-        needs_web = wants_web_details(state["question"])
         out["lore"] = "\n".join(facts)
-        out["is_complete"] = bool(facts) and not needs_web
-        trace.record(
-            "node",
-            "rag",
-            f"récolte {'suffisante' if out['is_complete'] else 'insuffisante'} "
-            f"({len(facts)} résultat(s) d'outil"
-            f"{', détails web exigés par la question' if needs_web else ''})",
-        )
-        logger.info(
-            "Agent RAG : récolte {} ({} fait(s), demande web: {})",
-            out["is_complete"],
-            len(facts),
-            needs_web,
-        )
+        trace.record("node", "rag", f"récolte close : {len(facts)} résultat(s) d'outil")
     return out
 
 
@@ -263,7 +216,7 @@ def scraper_node(state: AgentState) -> dict:
             question=state["question"], lore=state.get("lore") or "(rien)"
         )
         history = [SystemMessage(SCRAPER_PROMPT), HumanMessage(brief)]
-        trace.record("node", "scraper", "enquête web déclenchée (récolte locale insuffisante)")
+        trace.record("node", "scraper", "enquête web déclenchée")
     response = llm.invoke(history)
 
     out: dict = {"scraper_messages": [*history, response] if first_call else [response]}
@@ -275,7 +228,6 @@ def scraper_node(state: AgentState) -> dict:
         # Narration saura au moins que l'enquête a fait chou blanc.
         out["web_findings"] = "\n".join(facts) or str(response.content)
         trace.record("node", "scraper", f"enquête close ({len(facts)} trouvaille(s))")
-        logger.info("Agent Scraper : {} trouvaille(s) web", len(facts))
     return out
 
 
@@ -298,7 +250,6 @@ def narration_node(state: AgentState) -> dict:
     )
     trace.record("node", "narration", f"dossier de {len(dossier)} car. transmis à la plume")
     response = _writer_llm().invoke([SystemMessage(NARRATION_PROMPT), HumanMessage(dossier)])
-    logger.info("Agent Narration : récit de {} car.", len(str(response.content)))
     return {"story": str(response.content), "path": ["narration"]}
 
 

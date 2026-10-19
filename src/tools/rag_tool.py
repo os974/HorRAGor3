@@ -3,7 +3,7 @@
 Regroupe les fonctions data de la Partie 2 derrière un contrat unique, pensé
 pour un agent LLM : **aucune fonction publique ne lève jamais d'exception** —
 en cas d'erreur (Ollama éteint, base injoignable...), on renvoie None/[] et on
-journalise. C'est le nœud RAG qui jugera si sa récolte est suffisante ; un
+journalise. C'est le routeur qui jugera si la récolte est suffisante ; un
 outil qui plante ne doit pas faire s'effondrer le graphe.
 
 Trois capacités :

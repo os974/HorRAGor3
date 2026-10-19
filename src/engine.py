@@ -72,6 +72,15 @@ class GraphEngine:
                 sources=self._sources_from(events),
                 trace=events,
             )
+            # Instrumentation centralisée : les nœuds restent purs, le résumé
+            # métier du run est journalisé ici, une fois le graphe terminé.
+            logger.info(
+                "Graphe : {} (lore {} car., web {} car., récit {} car.)",
+                " → ".join(response.path),
+                len(result.get("lore") or ""),
+                len(result.get("web_findings") or ""),
+                len(answer),
+            )
         except GraphRecursionError:
             logger.warning("Graphe interrompu : limite de récursion ({})", RECURSION_LIMIT)
             trace.record("node", "engine", "limite de récursion atteinte")

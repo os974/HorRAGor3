@@ -1,8 +1,8 @@
-"""Aides pures de nodes.py : jugement déterministe, sans LLM."""
+"""Aides pures de nodes.py : récolte déterministe, sans LLM."""
 
 from langchain_core.messages import AIMessage, ToolMessage
 
-from src.graph.nodes import _first_visit, _pretty_facts, harvest_facts, wants_web_details
+from src.graph.nodes import _first_visit, _pretty_facts, harvest_facts
 
 
 def test_harvest_facts_ne_garde_que_les_found_true():
@@ -18,27 +18,6 @@ def test_harvest_facts_ne_garde_que_les_found_true():
 def test_harvest_facts_vide_sans_tool_messages():
     """Aucun ToolMessage → récolte vide."""
     assert harvest_facts([AIMessage(content="rien")]) == []
-
-
-def test_wants_web_details_detecte_les_demandes_hors_base():
-    """Anecdotes/coulisses/trivia → la base locale ne suffira jamais."""
-    for question in (
-        "Des anecdotes de tournage du film Weapons ?",
-        "Raconte les secrets de tournage de The Thing",
-        "Behind the scenes trivia about Hereditary",
-        "Le making of d'Alien",
-    ):
-        assert wants_web_details(question), question
-
-
-def test_wants_web_details_laisse_passer_les_questions_locales():
-    """Métadonnées, synopsis, recommandations : la base locale suffit."""
-    for question in (
-        "Parle-moi du film Hereditary",
-        "Des films semblables à Midsommar ?",
-        "Quelle est l'année de sortie d'Alien ?",
-    ):
-        assert not wants_web_details(question), question
 
 
 def test_first_visit_selon_le_path():
