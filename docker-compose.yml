@@ -3,7 +3,7 @@
 #   navigateur ── https://horragor.localhost (127.0.0.1:443) ──> traefik ──> frontend
 #   frontend ── front_net (INTERNE) ── https://api.horragor.localhost ──> traefik ──> api-ia
 #   api-ia ── data_net (INTERNE, étanche) ──> api-donnees ── db_net (INTERNE) ──> db
-#   api-ia ── ia_net ──> Ollama (hôte, host-gateway) + web (Enquêteur)
+#   api-ia ── ia_net ──> web (Enquêteur) ; ── host-gateway ──> ollama-relay ──> Ollama (hôte)
 #   api-ia ── langfuse_ingest ──> langfuse-web (traces de l'agent)
 #
 # Monitoring 360° (brief) : Prometheus + Grafana + Uptime Kuma pour la
@@ -30,13 +30,20 @@ x-hardening: &hardening
   cap_drop:
     - ALL
 
+x-healthcheck: &healthcheck
+  interval: 30s
+  timeout: 5s
+  retries: 3
+
 networks:
-  # Traefik ↔ frontend uniquement. Interne : le front n'a pas d'internet.
+  # Traefik ↔ frontend (+ la sonde Uptime Kuma). Interne : le front n'a pas d'internet.
   front_net:
     internal: true
-  # Traefik ↔ api-ia, avec sortie internet (Enquêteur web, Ollama sur l'hôte).
+  # Traefik ↔ api-ia, avec sortie internet (Enquêteur web, Ollama sur l'hôte) ;
+  # Prometheus et Uptime Kuma y lisent api-ia et Traefik.
   ia_net:
-  # Le réseau privé étanche du brief : api-ia ↔ api-donnees, sans sortie.
+  # Le réseau privé étanche du brief : api-ia ↔ api-donnees, sans sortie
+  # (Prometheus et Uptime Kuma y lisent l'API Données, jamais la base).
   data_net:
     internal: true
   # La base n'est joignable QUE par l'API Données.
@@ -71,7 +78,9 @@ services:
     cap_add:
       - DAC_READ_SEARCH
     ports:
-      - "127.0.0.1:443:8443" # l'UNIQUE port publié, et seulement sur la boucle locale
+      # Le SEUL port applicatif publié, et seulement sur la boucle locale (les
+      # UIs d'observabilité le sont aussi, sur 127.0.0.1 : 3000-3002, 9090).
+      - "127.0.0.1:443:8443"
     volumes:
       - ./traefik/dynamic.yml:/etc/traefik/dynamic.yml:ro
       - ./certs/cluster.pem:/certs/cluster.pem:ro
@@ -84,9 +93,7 @@ services:
         - --ping
         - --ping.entrypoint=internal
         - --entrypoints.internal.address=:8082
-      interval: 30s
-      timeout: 5s
-      retries: 3
+      <<: *healthcheck
     networks:
       front_net:
         # Le frontend résout api.horragor.localhost → Traefik (seul chemin vers
@@ -149,6 +156,20 @@ services:
         condition: service_healthy
     restart: unless-stopped
 
+  ollama-relay:
+    # Ollama tourne sur l'hôte (GPU, poids des modèles) et n'écoute que sur
+    # 127.0.0.1 : ce relais l'expose sur la SEULE passerelle Docker
+    # (host-gateway, 172.17.0.1 par défaut), jamais sur le réseau local, sans
+    # toucher à la configuration de l'hôte ni à localhost:11434.
+    <<: *hardening
+    image: alpine/socat:1.8.0.3
+    network_mode: host
+    user: "65534:65534"
+    command:
+      - TCP-LISTEN:11434,bind=${DOCKER_GATEWAY_IP:-172.17.0.1},fork,reuseaddr
+      - TCP:127.0.0.1:11434
+    restart: unless-stopped
+
   api-ia:
     <<: *hardening
     build:
@@ -158,8 +179,9 @@ services:
       DATA_API_URL: http://api-donnees:8100 # jamais d'identifiants de base ici
       OLLAMA_BASE_URL: http://host.docker.internal:11434
       LANGFUSE_HOST: http://langfuse-web:3000
-      LANGFUSE_PUBLIC_KEY: ${LANGFUSE_PUBLIC_KEY:-}
-      LANGFUSE_SECRET_KEY: ${LANGFUSE_SECRET_KEY:-}
+      # Les clés du projet provisionné par l'init headless de Langfuse.
+      LANGFUSE_PUBLIC_KEY: ${LANGFUSE_PUBLIC_KEY}
+      LANGFUSE_SECRET_KEY: ${LANGFUSE_SECRET_KEY}
       JWT_SECRET: ${JWT_SECRET:?JWT_SECRET manquant dans .env}
       APP_USERNAME: ${APP_USERNAME:?APP_USERNAME manquant dans .env}
       APP_PASSWORD: ${APP_PASSWORD:?APP_PASSWORD manquant dans .env}
@@ -212,10 +234,8 @@ services:
       - ./monitoring/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
       - prometheus_data:/prometheus
     healthcheck:
+      <<: *healthcheck
       test: ["CMD", "wget", "-q", "--spider", "http://localhost:9090/-/healthy"]
-      interval: 30s
-      timeout: 5s
-      retries: 3
     # ia_net : api-ia + Traefik ; data_net : api-donnees ; obs_net : Grafana.
     networks:
       - obs_net
@@ -241,10 +261,8 @@ services:
       - ./monitoring/grafana/provisioning:/etc/grafana/provisioning:ro
       - grafana_data:/var/lib/grafana
     healthcheck:
+      <<: *healthcheck
       test: ["CMD", "wget", "-q", "--spider", "http://localhost:3000/api/health"]
-      interval: 30s
-      timeout: 5s
-      retries: 3
     networks:
       - obs_net
     depends_on:
@@ -253,10 +271,17 @@ services:
     restart: unless-stopped
 
   uptime-kuma:
+    <<: *hardening
     image: louislam/uptime-kuma:1.23.16
-    security_opt:
-      - no-new-privileges:true
+    # L'entrypoint réattribue /app/data (CHOWN) puis bascule sur PUID/PGID via
+    # setpriv (SETUID/SETGID) : Node tourne ensuite sans privilège.
+    cap_add:
+      - CHOWN
+      - SETUID
+      - SETGID
     environment:
+      PUID: "1001"
+      PGID: "1001"
       # Fait confiance à la CA locale : les sondes TLS de l'entrée publique
       # vérifient le certificat, comme le front.
       NODE_EXTRA_CA_CERTS: /certs/ca.pem
@@ -265,6 +290,8 @@ services:
     volumes:
       - kuma_data:/app/data
       - ./certs/ca.pem:/certs/ca.pem:ro
+    extra_hosts:
+      - host.docker.internal:host-gateway # sonde du LLM via le relais Ollama
     # Une patte sur chaque réseau à sonder (sondes créées par
     # scripts/setup_uptime_kuma.py).
     networks:

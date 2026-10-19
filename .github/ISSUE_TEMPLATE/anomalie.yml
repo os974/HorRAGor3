@@ -1,0 +1,50 @@
+name: Anomalie
+description: Un composant échoue, plante ou renvoie une erreur.
+title: "[Anomalie] "
+labels: ["anomalie"]
+body:
+  - type: dropdown
+    id: couche
+    attributes:
+      label: Couche concernée
+      options:
+        - Données (base, API Données)
+        - Intelligence (API IA, graphe multi-agent, outils)
+        - Présentation (Streamlit)
+        - Cluster (Docker, Traefik, réseaux, TLS)
+        - Observabilité (Langfuse, Prometheus, Grafana, Uptime Kuma)
+        - CI/CD et documentation
+    validations:
+      required: true
+  - type: textarea
+    id: constat
+    attributes:
+      label: Constat
+      description: Ce qui se passe, en une ou deux phrases.
+    validations:
+      required: true
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Reproduction
+      description: Commandes ou étapes exactes.
+      render: bash
+    validations:
+      required: true
+  - type: textarea
+    id: attendu
+    attributes:
+      label: Comportement attendu
+    validations:
+      required: true
+  - type: textarea
+    id: preuves
+    attributes:
+      label: Preuves (logs, trace, captures)
+      description: Extrait Loguru, session_id (corrélation avec la trace Langfuse), alerte Uptime Kuma, panneau Grafana…
+      render: text
+  - type: textarea
+    id: cause
+    attributes:
+      label: Cause identifiée et correctif
+      description: À compléter à la résolution (commit ou PR de correction).

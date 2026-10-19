@@ -431,6 +431,8 @@ navigateur ── https://horragor.localhost ──> traefik (443, SEUL port pub
    └──> api-ia (JWT) ──data_net (internal, étanche)──> api-donnees ──> Supabase
               └──host-gateway──> Ollama (hôte) · Langfuse (hôte:3000) · web
 ```
+*(État à ce chapitre : la base rejoint le cluster au chapitre 9, Langfuse au
+chapitre 11, et la topologie est durcie au chapitre 10.)*
 
 ### `scripts/gen_certs.sh` + `traefik/`
 - **Entrées** : openssl (une fois).
@@ -451,7 +453,7 @@ navigateur ── https://horragor.localhost ──> traefik (443, SEUL port pub
   (supprimée au chapitre 9, quand la base rejoint le cluster) ;
   **ségrégation des secrets** : `DATABASE_URL` n'est fourni qu'à api-donnees,
   api-ia ne reçoit que `DATA_API_URL` ; Ollama et Langfuse restent sur l'hôte
-  (`host-gateway`) ; l'index FAISS est monté en volume RO (jamais dans
+  (`host-gateway` ; Langfuse est intégré au chapitre 11) ; l'index FAISS est monté en volume RO (jamais dans
   l'image) ; Traefik résout `api.horragor.localhost` en interne (alias
   réseau) et route le navigateur vers le front. Chaque Dockerfile embarque
   un `HEALTHCHECK` (sondes Docker + Uptime Kuma).
@@ -517,8 +519,8 @@ répond (front HTTPS 200, certificat vérifié contre la CA locale ; login → j
 ⚠️ **Anomalie découverte** (détaillée au chapitre 10) : `/chat` en cluster renvoie le repli gothique —
 Ollama, sur l'hôte, n'écoute que sur `127.0.0.1:11434` et refuse les connexions
 venues des conteneurs (`host.docker.internal` → *Connection refused*). Le
-cluster n'avait donc jamais servi un récit de bout en bout. Correctif en attente
-d'arbitrage (configuration d'Ollama côté hôte).
+cluster n'avait donc jamais servi un récit de bout en bout. Résolu au
+chapitre 16 (relais vers la seule passerelle Docker).
 
 ---
 
@@ -638,7 +640,7 @@ UIs : 127.0.0.1 → Langfuse :3000 · Kuma :3001 · Grafana :3002 · Prometheus 
 
 ### `scripts/setup_uptime_kuma.py` — les sondes, as code aussi
 - Uptime Kuma n'a pas de provisioning par fichier : le script (idempotent,
-  `uv run --with uptime-kuma-api`) crée le compte admin puis 9 sondes — les
+  `uv run --env-file .env --with uptime-kuma-api`) crée le compte admin puis 9 sondes — les
   deux **entrées publiques en TLS vérifié** (Kuma fait confiance à la CA
   locale via `NODE_EXTRA_CA_CERTS`), Streamlit, API IA, API Données, la
   **chaîne API → Postgres** (sonde à mot-clé : `/films/41` doit contenir
@@ -734,7 +736,118 @@ build Sphinx strict réussi dans un clone propre ; les 3 images construites
 localement avec les mêmes Dockerfiles (cluster du chapitre 11) ; 118 tests,
 couverture 94 % (API IA 94 %, API Données 95 %, UI 95 %) — la revue QA a
 ajouté les tests du refresh silencieux côté UI et du fail-open Langfuse.
-Premier passage sur GitHub : au merge de la pile de branches dans `main`
-(Pages doit être activé en mode « GitHub Actions » dans les réglages du dépôt).
 
-*Chapitre suivant : GitHub Issues.*
+**Vu sur GitHub** (2026-10-20) : CI et CD en mode PR verts sur les PR de la
+pile ; premier CD réel au merge de #15 dans `main` — 6 jobs verts (CI rejouée
+en garde-fou, 3 images, doc, Pages) ; images `ghcr.io/os974/horragor3-*`
+publiées en `latest` + `sha-f73aff2` et **publiques** (téléchargeables sans
+compte, visibilité héritée du dépôt) ; doc en ligne sur
+https://os974.github.io/HorRAGor3/ (Pages activé en mode « GitHub Actions »).
+
+⚠️ **Comportement déviant** (#19) : la branche de base n'ayant pas été
+supprimée après le merge de #15, GitHub a recibé les PR empilées #16 à #18
+sur `ci/cd-ghcr-pages` au lieu de `main` — `main` et la doc publiée ont
+manqué les trois derniers commits. Rattrapé par une PR dédiée vers `main`.
+Leçon : dans une pile de PR, supprimer la branche de base après **chaque**
+merge (ou activer « Automatically delete head branches »).
+
+---
+
+## Chapitre 14 — La traçabilité par GitHub Issues
+
+Le brief : « chaque anomalie ou comportement déviant détecté devra faire
+l'objet d'un ticket archivé dans vos GitHub Issues ».
+
+### `.github/ISSUE_TEMPLATE/` — des tickets exploitables
+- `config.yml` : pas de ticket libre, tout passe par un formulaire.
+- **Anomalie** (un composant échoue) : couche concernée, constat,
+  reproduction, attendu, preuves, puis cause et correctif à la résolution.
+- **Comportement déviant** (le système tourne mais se trompe) : nature
+  (routage, réponse de l'agent, isolation de contexte, sécurité,
+  performance), question posée, observé/attendu, et le **`session_id`** —
+  l'identifiant de corrélation qui relie la conversation à sa trace Langfuse
+  et à ses logs Loguru (règle d'observabilité de la Phase A).
+
+### Le registre des anomalies rencontrées
+Chaque incident de ce livre devient un ticket, clos avec la référence de son
+correctif : quota Supabase (ch. 6), Traefik API 1.44 et 504 (ch. 8), port
+ClickHouse et méta-paquet `langchain` (ch. 4), Langfuse muet (ch. 11),
+Mermaid/Sphinx (ch. 12), revue de sécurité (ch. 10), CD sans garde-fou
+(ch. 13), Ollama injoignable depuis le cluster (ch. 9, résolu au ch. 16).
+
+**Archivé** (2026-10-19) : tickets #1 à #10 sur
+https://github.com/os974/HorRAGor3/issues, labellisés par nature
+(`anomalie`, `comportement-déviant`, `sécurité`) et par couche (`données`,
+`intelligence`, `cluster`, `observabilité`, `ci-cd`), chacun clos avec la
+référence de son correctif. Puis #19, ouvert au premier passage du CD
+(chapitre 13) et clos par la PR qui le corrige.
+
+---
+
+## Chapitre 15 — La clôture de la Phase G
+
+Trois revues ont encadré l'épilogue, chacune appliquée avant de pousser :
+sécurité (chapitre 10), qualité des tests et du pipeline (chapitre 13), et
+une revue qualité finale. Cette dernière a surtout relevé des **textes rendus
+faux par l'avancement** — le risque propre à un livre tenu au fil de l'eau :
+- « l'unique port publié » : vrai pour l'application (`127.0.0.1:443`), mais
+  les UIs d'observabilité publient aussi sur la boucle locale — reformulé ;
+- README : installation de Langfuse par clone externe, `--cov=src`,
+  « 83 tests », CI « sur push » — remis à jour ;
+- `SUPABASE_URL`/`SUPABASE_KEY` : configuration morte (lue nulle part),
+  supprimée ; Supabase n'est plus présenté comme « la » base mais comme la
+  source du dump et l'accès direct en dev ;
+- Uptime Kuma tournait hors de l'ancre de durcissement : il la rejoint, avec
+  les trois seules capacités dont son entrypoint a besoin (`CHOWN`, `SETUID`,
+  `SETGID` pour basculer sur l'uid 1001). Les six conteneurs Langfuse gardent
+  la configuration officielle de l'éditeur, sur leur réseau interne ;
+- healthchecks factorisés (ancre `x-healthcheck`), script Kuma sans
+  dépendance implicite (`--env-file` au lieu de `python-dotenv`).
+
+---
+
+## Chapitre 16 — Le relais Ollama : le premier récit en conteneurs
+
+Dernier écart fonctionnel (chapitre 9) : Ollama, service de l'hôte (GPU,
+modèles de plusieurs Go), n'écoute que sur `127.0.0.1:11434`. Les conteneurs
+l'appellent par `host.docker.internal`, c'est-à-dire la passerelle Docker
+(`172.17.0.1`) — connexion refusée.
+
+Trois voies écartées : écouter sur `0.0.0.0` (Ollama n'a pas
+d'authentification : tout le réseau local en profiterait) ; lier Ollama à la
+passerelle par un override systemd (casse `localhost:11434` pour les autres
+projets) ; un relais systemd sur l'hôte (configuration hors du repo, non
+reproductible).
+
+### `docker-compose.yml` — le service `ollama-relay`
+- **Entrées** : les appels LLM d'api-ia vers `host.docker.internal:11434`.
+- **Sorties** : les mêmes requêtes, relayées vers `127.0.0.1:11434`.
+- **Ce qui s'y passe** : un conteneur `alpine/socat` en `network_mode: host`
+  (il voit la boucle locale de l'hôte) écoute **uniquement** sur l'IP de la
+  passerelle Docker (`DOCKER_GATEWAY_IP`, `172.17.0.1` par défaut) — jamais
+  sur le réseau local — et relaie vers Ollama. Utilisateur `nobody`,
+  `cap_drop: ALL`, `no-new-privileges`. Ni sudo ni configuration de l'hôte :
+  tout reste dans le repo, et `localhost:11434` reste intact.
+- **Sonde dédiée** : la revue de sécurité l'avait noté, `/health` restait vert
+  alors que chaque récit tombait sur le repli. Uptime Kuma sonde désormais le
+  LLM par le même chemin qu'api-ia (« Intelligence — Ollama (via relais) »).
+
+**Vu en réel** (2026-10-19) : `ss` montre le relais sur `172.17.0.1:11434`
+seulement (Ollama reste sur `127.0.0.1`) ; à travers tout le cluster (Traefik
+TLS → JWT → api-ia → API Données → Postgres, + TMDB et web) :
+- « Parle-moi du film Hereditary » → parcours `rag → narration`, sources
+  `validate_film`, `get_metadata`, `get_credits`, 75 s (chargement du modèle
+  inclus) ;
+- « Raconte-moi des anecdotes de tournage sur Hereditary » → parcours
+  `rag → scraper → narration`, sources + `search_web`, `scrape`, 29 s ;
+- **Langfuse intégré** : une trace par session ; pour la seconde, 24
+  observations dont 6 générations LLM (6 698 tokens), l'arbre complet des
+  nœuds, des routeurs (`should_continue_rag`, `should_continue_scraper`) et
+  des outils (`lookup_movie`, `web_search`, `wikipedia_synopsis`) ;
+- Prometheus : `/chat` 2 × `2xx` ; **10 sondes Uptime Kuma UP**.
+
+### Et ensuite
+Tickets archivés (chapitre 14), pile de PR mergée dans `main`, images sur
+GHCR et documentation en ligne (chapitre 13) : l'épilogue du brief est livré.
+
+*Fin de la Phase G — l'épilogue MLOps du brief.*

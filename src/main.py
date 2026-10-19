@@ -6,8 +6,11 @@ Lancement (depuis la racine) :
 Endpoints :
     - ``GET /health`` : vitalité (CI, Docker HEALTHCHECK, Uptime Kuma) ;
     - ``GET /metrics`` : métriques Prometheus (règle observabilité : chaque
-      service naît instrumenté) ;
-    - ``POST /chat`` : l'unique porte métier — ChatRequest → graphe → ChatResponse.
+      service naît instrumenté) — non routé en public dans le cluster ;
+    - ``POST /auth/login`` et ``POST /auth/refresh`` : la paire de jetons
+      (Refresh Tokens du brief, voir :mod:`src.auth`) ;
+    - ``POST /chat`` : l'unique porte métier (JWT requis) — ChatRequest →
+      graphe → ChatResponse.
 
 Le ``lifespan`` charge l'index FAISS UNE fois au démarrage (routage de titres
 instantané, en RAM) avec dégradation propre s'il est absent.

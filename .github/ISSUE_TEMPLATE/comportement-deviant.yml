@@ -1,0 +1,47 @@
+name: Comportement déviant
+description: Le système fonctionne mais ne fait pas ce qu'il devrait (routage, récit, hallucination, sécurité…).
+title: "[Déviant] "
+labels: ["comportement-déviant"]
+body:
+  - type: dropdown
+    id: nature
+    attributes:
+      label: Nature
+      options:
+        - Routage du graphe (mauvais agent sollicité)
+        - Réponse de l'agent (hallucination, hors sujet, ton)
+        - Isolation de contexte (la narration voit la plomberie)
+        - Sécurité (accès, jetons, exposition réseau)
+        - Performance (latence, tokens, coût)
+        - Autre
+    validations:
+      required: true
+  - type: textarea
+    id: question
+    attributes:
+      label: Question posée / action effectuée
+    validations:
+      required: true
+  - type: textarea
+    id: observe
+    attributes:
+      label: Ce qui a été observé
+      description: Parcours des agents affiché par le front, extrait de la réponse.
+    validations:
+      required: true
+  - type: textarea
+    id: attendu
+    attributes:
+      label: Ce qui était attendu
+    validations:
+      required: true
+  - type: input
+    id: session
+    attributes:
+      label: session_id
+      description: Pour retrouver la trace dans Langfuse et les logs Loguru.
+  - type: textarea
+    id: analyse
+    attributes:
+      label: Analyse (Langfuse, Grafana)
+      description: Nœuds traversés, tokens, latences, décisions des routeurs.

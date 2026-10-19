@@ -21,9 +21,13 @@ Flux : `START → rag → [routeur] → (narration | scraper → narration) → 
 
 - [uv](https://docs.astral.sh/uv/), Python ≥ 3.12
 - [Ollama](https://ollama.com) avec `ollama pull qwen2.5:7b` et `ollama pull nomic-embed-text`
-- Un `.env` rempli d'après `.env.example` (Supabase ; Langfuse optionnel)
-- Monitoring (optionnel) : Langfuse self-hosted — `git clone https://github.com/langfuse/langfuse && cd langfuse && docker compose up -d`, compte local sur `http://localhost:3000`, clés dans `.env`. Sans clés, l'app tourne à l'identique (fail-open).
+- Un `.env` rempli d'après `.env.example`
 - L'index FAISS dans `data/faiss_index/` (copié depuis HorRAGor2, ou reconstruit)
+- Docker (cluster et monitoring)
+
+Hors cluster (mode dev), l'API lit la base directement via `DATABASE_URL`
+(Supabase) ; Langfuse est optionnel (sans clés, l'app tourne à l'identique,
+fail-open) — il peut être lancé seul avec `docker compose up -d langfuse-web`.
 
 ## Installation
 
@@ -48,15 +52,20 @@ Endpoints : `GET /health`, `GET /metrics` (Prometheus), `POST /auth/login`, `POS
 
 ```bash
 ./scripts/gen_certs.sh     # une fois : CA locale + certificat TLS
-./scripts/dump_supabase.sh # une fois : dump de la base (POSTGRES_* requis dans .env)
+./scripts/dump_supabase.sh # une fois : dump de la base source (lit DATABASE_URL)
 docker compose up -d --build
 ```
 
+Le `.env` doit aussi contenir les secrets du cluster (`POSTGRES_*`, `JWT_SECRET`,
+`APP_*`, `LANGFUSE_*`, `GRAFANA_ADMIN_PASSWORD`, `KUMA_*` — voir `.env.example`).
+
 Puis ouvre **https://horragor.localhost** (accepte le certificat de la CA locale,
 ou importe `certs/ca.pem` dans le navigateur) et connecte-toi avec
-`APP_USERNAME`/`APP_PASSWORD` du `.env`. Architecture : Traefik (443, seul port
-publié) → Streamlit → API IA (JWT) → réseau privé étanche → API Données →
-Postgres + pgvector (conteneur, réseau interne dédié). Ollama reste sur l'hôte.
+`APP_USERNAME`/`APP_PASSWORD` du `.env`. Architecture : Traefik (127.0.0.1:443,
+seul port applicatif publié) → Streamlit → API IA (JWT) → réseau privé étanche →
+API Données → Postgres + pgvector (conteneur, réseau interne dédié). Ollama reste
+sur l'hôte (GPU) : le service `ollama-relay` l'expose aux conteneurs sur la seule
+passerelle Docker (`172.17.0.1`), jamais sur le réseau local.
 
 Monitoring 360° (interfaces sur la boucle locale uniquement) :
 
@@ -68,9 +77,11 @@ Monitoring 360° (interfaces sur la boucle locale uniquement) :
 | Prometheus | http://localhost:9090 | métriques brutes (APIs + Traefik) |
 
 Au premier lancement, créer les sondes Uptime Kuma :
-`uv run --with uptime-kuma-api==1.2.1 python scripts/setup_uptime_kuma.py`.
+`uv run --env-file .env --with uptime-kuma-api==1.2.1 python scripts/setup_uptime_kuma.py`.
 
 ## Documentation (Sphinx)
+
+En ligne (publiée par le CD à chaque merge sur `main`) : https://os974.github.io/HorRAGor3/
 
 ```bash
 uv run --group docs sphinx-build -W -b html docs/sphinx docs/sphinx/_build/html
@@ -83,11 +94,16 @@ relationnels (MCD/MLD/MPD), cartographie du graphe générée depuis
 ## Tests
 
 ```bash
-uv run pytest --cov=src    # 83 tests hermétiques (ni Ollama, ni réseau), verrou à 80 %
+uv run pytest --cov        # 118 tests hermétiques (ni Ollama, ni réseau), verrou à 80 %
 uv run ruff check . && uv run ruff format --check .
 ```
 
-La CI GitHub Actions rejoue exactement ces commandes à chaque push/PR sur `main`.
+CI/CD GitHub Actions :
+- `ci.yml` (chaque PR, et appelée par `cd.yml` sur `main`) : ruff, shellcheck,
+  pytest avec 80 % de couverture **par périmètre** (API IA, API Données, UI) ;
+- `cd.yml` : images des 3 couches construites à chaque PR, poussées sur GHCR
+  et doc Sphinx publiée sur GitHub Pages après merge sur `main`, **seulement si
+  la CI est verte**.
 
 ## État d'avancement
 
@@ -97,12 +113,13 @@ La CI GitHub Actions rejoue exactement ces commandes à chaque push/PR sur `main
 - [x] Phase D — API FastAPI (/health, /metrics, /chat) + front Streamlit (parcours des agents)
 - [x] Phase E — Monitoring Langfuse (self-hosted Docker, CallbackHandler v3 fail-open, traces par session)
 - [x] Phase F — Tests (83 tests hermétiques, 92 % de couverture) + CI GitHub Actions
-- [ ] Phase G — Épilogue MLOps
+- [x] Phase G — Épilogue MLOps
   - [x] G1 — API Données dédiée (la base encapsulée, réseau privé)
-  - [x] G2 — Authentification par Refresh Tokens (JWT access/refresh)
-  - [x] G3 — Cluster Docker 3 couches (Traefik + TLS vérifié, réseau interne étanche)
-  - [ ] BDD conteneurisée (Postgres + pgvector dans le cluster)
-  - [ ] Monitoring 360° (Langfuse intégré, Prometheus, Grafana, Uptime Kuma)
-  - [ ] Documentation Sphinx (2 API, schémas relationnels, carte du graphe)
-  - [ ] CD (images GHCR + doc sur GitHub Pages)
-  - [ ] GitHub Issues (un ticket par anomalie)
+  - [x] G2 — Authentification par Refresh Tokens (JWT access/refresh, révocation sur rejeu)
+  - [x] G3 — Cluster Docker 3 couches (Traefik + TLS vérifié, réseaux internes, durcissement)
+  - [x] BDD conteneurisée (Postgres + pgvector dans le cluster, rôle en lecture seule)
+  - [x] Monitoring 360° (Langfuse intégré, Prometheus, Grafana, Uptime Kuma)
+  - [x] Documentation Sphinx (2 API, schémas relationnels, carte du graphe)
+  - [x] CI/CD (images publiques sur GHCR, doc en ligne : https://os974.github.io/HorRAGor3/)
+  - [x] GitHub Issues (formulaires + un ticket archivé par anomalie : https://github.com/os974/HorRAGor3/issues)
+  - [x] Récit de bout en bout en conteneurs (relais Ollama, traces dans le Langfuse intégré)
