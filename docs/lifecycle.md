@@ -737,4 +737,29 @@ ajouté les tests du refresh silencieux côté UI et du fail-open Langfuse.
 Premier passage sur GitHub : au merge de la pile de branches dans `main`
 (Pages doit être activé en mode « GitHub Actions » dans les réglages du dépôt).
 
-*Chapitre suivant : GitHub Issues.*
+---
+
+## Chapitre 14 — La traçabilité par GitHub Issues
+
+Le brief : « chaque anomalie ou comportement déviant détecté devra faire
+l'objet d'un ticket archivé dans vos GitHub Issues ».
+
+### `.github/ISSUE_TEMPLATE/` — des tickets exploitables
+- `config.yml` : pas de ticket libre, tout passe par un formulaire.
+- **Anomalie** (un composant échoue) : couche concernée, constat,
+  reproduction, attendu, preuves, puis cause et correctif à la résolution.
+- **Comportement déviant** (le système tourne mais se trompe) : nature
+  (routage, réponse de l'agent, isolation de contexte, sécurité,
+  performance), question posée, observé/attendu, et le **`session_id`** —
+  l'identifiant de corrélation qui relie la conversation à sa trace Langfuse
+  et à ses logs Loguru (règle d'observabilité de la Phase A).
+
+### Le registre des anomalies rencontrées
+Chaque incident de ce livre devient un ticket, clos avec la référence de son
+correctif : quota Supabase (ch. 6), Traefik API 1.44 et 504 (ch. 8), port
+ClickHouse et méta-paquet `langchain` (ch. 4), Langfuse muet (ch. 11),
+Mermaid/Sphinx (ch. 12), revue de sécurité (ch. 10), CD sans garde-fou
+(ch. 13). Un seul reste **ouvert** : Ollama injoignable depuis le cluster
+(ch. 9), en attente d'un arbitrage sur la configuration de l'hôte.
+
+*Chapitre suivant : la clôture de la Phase G.*
