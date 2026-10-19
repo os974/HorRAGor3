@@ -92,7 +92,7 @@ Agent ReAct LangGraph (déjà `langgraph>=1.2.4` !) avec nœud Juge anti-halluci
 - **Export Mermaid** : `src/backend/agent/export_graph.py`
 - Dépendances d'infra : Ollama local + Supabase (`DATABASE_URL`) ; repli titres SQLite : `../HorRAGor1/data/horragor.db`
 
-## Décisions actées (avec l'utilisateur)
+## Décisions actées
 
 1. **Structure hybride** : arborescence du PDF pour la partie graphe (`src/graph/`, `src/models/state.py`, `src/tools/`, `src/config.py`, `src/main.py`, `app_frontend.py`) + acquis de HorRAGor2 (contracts Pydantic, trace, tests, CI)
 2. **Scraper web** : Wikipédia (existant) **+ DuckDuckGo via la lib `ddgs`** (gratuit, sans clé — cohérent avec le 100 % local)
@@ -136,15 +136,8 @@ Tenir `docs/lifecycle.md` **au fil de l'eau** (pas à la fin) : le cycle de vie 
 
 ## Étapes d'implémentation
 
-### Étape 0 — Mise en mémoire (demande explicite de l'utilisateur) ✅ fait
-- Règle de travail « vérifier plan vs brief avant de coder » enregistrée (`verifier-plan-vs-brief-avant-code.md`)
-Sauvegarder ce plan dans la mémoire persistante (`~/.claude/projects/-home-olivier-Bureau-Simplon-HorRAGor3/memory/`) :
-- `horragor3-plan.md` (type `project`) : synthèse du brief, phases, décisions actées
-- `horragor-ecosysteme.md` (type `project`) : cartographie HorRAGor1/2/MultiAgent et chemins des briques réutilisables
-- Mettre à jour `MEMORY.md` avec les pointeurs
-
-> **État d'avancement** — ✅ A (commit `8978270`) · ✅ B (`958a042`) · ✅ C (`89f6adb`) · ✅ D (`9da4371`) · ✅ E (`6d98050`, Langfuse + routage sensible au type de question) · ✅ F (`abd56b1`, 83 tests, 92 %, CI) · G : ✅ G1 API Données (`4c91601`) · ✅ G2 Refresh Tokens JWT (`5299243`) · ✅ G3 cluster Docker + TLS (`6716f16`) · ✅ BDD conteneurisée (`97efbf4`) · ✅ durcissement après revue de sécurité (`4c9f80d`) · ✅ monitoring 360° (`5cba9bb`) · ✅ Sphinx (`d1f3f26`) · ✅ CI/CD (`eb55b2d`, premier passage au merge sur `main`) · ✅ Issues (formulaires `cb190f1`, tickets #1–#10 archivés, #19) · ✅ relais Ollama, récit de bout en bout en conteneurs (`c2ce142`). PR #11–#18 mergées (rattrapage de #16–#18 vers `main` : #19) ; CD réel vert : images publiques sur GHCR, doc sur https://os974.github.io/HorRAGor3/. **Phase G terminée.**
-> (Hashs réécrits le 2026-07-10 avant le premier push : correction de l'email d'auteur → `olivier.schollaert@live.be`.)
+> **État d'avancement** — ✅ A (commit `f8a1cd3`) · ✅ B (`44c0d54`) · ✅ C (`5a72816`) · ✅ D (`9e28c49`) · ✅ E (`564abea`, Langfuse + routage sensible au type de question) · ✅ F (`06cb5f7`, 83 tests, 92 %, CI) · G : ✅ G1 API Données (`8b46e96`) · ✅ G2 Refresh Tokens JWT (`5edd066`) · ✅ G3 cluster Docker + TLS (`58f0d73`) · ✅ BDD conteneurisée (`518c51c`) · ✅ durcissement après revue de sécurité (`68685b9`) · ✅ monitoring 360° (`db1cd65`) · ✅ Sphinx (`a6cd6aa`) · ✅ CI/CD (`8e5ee5d`, premier passage au merge sur `main`) · ✅ Issues (formulaires `59397d6`, tickets #1–#10 archivés, #19) · ✅ relais Ollama, récit de bout en bout en conteneurs (`5577c70`). PR #11–#18 mergées (rattrapage de #16–#18 vers `main` : #19) ; CD réel vert : images publiques sur GHCR, doc sur https://os974.github.io/HorRAGor3/. **Phase G terminée.**
+> (Hashs réécrits le 2026-07-10 avant le premier push : correction de l'email d'auteur → `olivier.schollaert@live.be` ; puis le 2026-10-20 : nettoyage de lignes de co-auteur dans les messages des phases A–F, contenu inchangé, références mises à jour.)
 > Réalisations notables : E2E validé sur les deux chemins avec qwen2.5:7b (18 s / 26 s) ; jugement de récolte déterministe (marqueur `"found"`) ; un canal de messages par agent (context trimming) ; API `/health` + `/metrics` + `/chat` et front Streamlit vérifiés en réel sur Supabase (TMDB + pgvector).
 
 ### Phase A — Socle du projet
