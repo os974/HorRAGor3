@@ -16,8 +16,10 @@
 # Secrets : les identifiants Postgres admin restent dans db ; api-donnees n'a
 # qu'un rôle en lecture seule ; api-ia ne connaît que DATA_API_URL.
 #
-# Prérequis : ./scripts/gen_certs.sh et ./scripts/dump_supabase.sh (une fois),
-# Ollama sur l'hôte. Les ${VAR} viennent du .env.
+# Une seule commande : `docker compose up -d`. Les conteneurs one-shot
+# certs-init (certificats TLS manquants) et kuma-setup (sondes Uptime Kuma)
+# préparent le reste. Prérequis : le .env, le dump de la base
+# (./scripts/dump_supabase.sh, une fois) et Ollama sur l'hôte.
 
 include:
   - path: monitoring/langfuse/compose.yml
@@ -59,6 +61,52 @@ volumes:
   kuma_data:
 
 services:
+  # --- Initialisation (one-shot, idempotente, à chaque `up`) ----------------
+  certs-init:
+    # Génère la CA locale et le certificat du cluster s'ils manquent (sinon ne
+    # touche à rien), puis les rend au propriétaire du projet, pas à root.
+    build:
+      context: .
+      dockerfile: docker/init.Dockerfile
+    image: horragor3-init:local
+    command:
+      - bash
+      - -c
+      - scripts/gen_certs.sh && chown -R "$$(stat -c %u:%g scripts/gen_certs.sh)" certs
+    volumes:
+      - ./scripts/gen_certs.sh:/work/scripts/gen_certs.sh:ro
+      - ./certs:/work/certs
+    network_mode: none
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    cap_add:
+      - CHOWN # rendre les fichiers au propriétaire du projet
+      - DAC_OVERRIDE # écrire dans certs/ s'il appartient à l'hôte
+
+  kuma-setup:
+    # Crée le compte admin d'Uptime Kuma et ses sondes (ajoute les absentes,
+    # met à jour celles qui ont changé) dès qu'il est prêt.
+    <<: *hardening
+    build:
+      context: .
+      dockerfile: docker/init.Dockerfile
+    image: horragor3-init:local
+    command: ["python", "scripts/setup_uptime_kuma.py"]
+    environment:
+      KUMA_URL: http://uptime-kuma:3001
+      KUMA_ADMIN_USER: ${KUMA_ADMIN_USER:?KUMA_ADMIN_USER manquant dans .env}
+      KUMA_ADMIN_PASSWORD: ${KUMA_ADMIN_PASSWORD:?KUMA_ADMIN_PASSWORD manquant dans .env}
+    volumes:
+      - ./scripts/setup_uptime_kuma.py:/work/scripts/setup_uptime_kuma.py:ro
+    networks:
+      - obs_net
+    depends_on:
+      uptime-kuma:
+        condition: service_healthy
+
+  # --- Le cluster -------------------------------------------------------------
   traefik:
     <<: *hardening
     image: traefik:v3.7.15
@@ -102,6 +150,9 @@ services:
           - api.horragor.localhost
           - horragor.localhost
       ia_net:
+    depends_on:
+      certs-init:
+        condition: service_completed_successfully
     restart: unless-stopped
 
   db:
@@ -225,6 +276,8 @@ services:
     networks:
       - front_net
     depends_on:
+      certs-init:
+        condition: service_completed_successfully
       api-ia:
         condition: service_healthy
     restart: unless-stopped
@@ -302,12 +355,15 @@ services:
       - ./certs/ca.pem:/certs/ca.pem:ro
     extra_hosts:
       - host.docker.internal:host-gateway # sonde du LLM via le relais Ollama
-    # Une patte sur chaque réseau à sonder (sondes créées par
-    # scripts/setup_uptime_kuma.py).
+    # Une patte sur chaque réseau à sonder (sondes créées par le conteneur
+    # kuma-setup, via scripts/setup_uptime_kuma.py).
     networks:
       - obs_net
       - front_net
       - ia_net
       - data_net
       - langfuse_ingest
+    depends_on:
+      certs-init:
+        condition: service_completed_successfully
     restart: unless-stopped

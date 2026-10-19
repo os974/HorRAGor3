@@ -6,7 +6,8 @@ ne pas alourdir les dépendances du projet). Il crée le compte admin au premier
 lancement, ajoute chaque sonde absente et remet à jour celles dont l'URL ou le
 mot-clé a changé.
 
-Lancement (cluster démarré ; identifiants lus dans le .env) :
+Lancé à chaque ``docker compose up`` par le conteneur one-shot kuma-setup, dès
+qu'Uptime Kuma est prêt. À la main (cluster démarré ; identifiants du .env) :
     uv run --env-file .env --with uptime-kuma-api==1.2.1 python scripts/setup_uptime_kuma.py
 """
 
