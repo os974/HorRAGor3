@@ -19,10 +19,13 @@ Les nœuds et outils sont **injectables** dans :func:`build_workflow` (pattern
 du module MultiAgent) : les tests câblent de faux agents via
 :func:`build_graph` et vérifient le routage sans appeler le moindre LLM.
 
-Le livrable du brief : ce fichier se termine par ``app = workflow.compile()``,
-l'objet final importé par FastAPI pour propulser le backend.
+Le livrable du brief : ce fichier se termine par ``app = workflow.compile(...)``,
+l'objet final importé par FastAPI pour propulser le backend. Le checkpointer
+passé à la compilation donne au graphe sa mémoire de session : chaque
+conversation (``thread_id``) retrouve son State d'une question à l'autre.
 """
 
+from langgraph.checkpoint.memory import InMemorySaver
 from langgraph.graph import END, START, StateGraph
 from langgraph.graph.state import CompiledStateGraph
 from langgraph.prebuilt import ToolNode
@@ -103,5 +106,6 @@ def build_graph(**nodes) -> CompiledStateGraph:
 
 
 # Le livrable : l'objet final, propre et prêt à l'emploi, importé par FastAPI.
+# Le checkpointer en mémoire garde le State de chaque conversation (thread_id).
 workflow = build_workflow()
-app = workflow.compile()
+app = workflow.compile(checkpointer=InMemorySaver())

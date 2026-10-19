@@ -1,7 +1,9 @@
 #!/usr/bin/env bash
 # Génère l'autorité locale + le certificat TLS du cluster (communication
 # chiffrée UI → API IA exigée par le brief). Idempotent : ne régénère pas
-# si les fichiers existent. Sortie : certs/ (gitignoré).
+# si les fichiers existent. Sortie : certs/ (gitignoré). Lancé à chaque
+# `docker compose up` par le conteneur one-shot certs-init ; utilisable aussi
+# à la main.
 #
 #   ca.pem / ca.key          — l'autorité locale (montée dans le front pour
 #                              VÉRIFIER le certificat : pas de verify=False)

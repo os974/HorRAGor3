@@ -61,7 +61,8 @@ def test_detour_quand_la_question_exige_le_web():
 
 
 def test_le_livrable_du_brief_est_compile():
-    """`app = workflow.compile()` expose bien la topologie du brief."""
+    """`app = workflow.compile(...)` expose la topologie du brief, avec sa mémoire."""
     assert isinstance(pipeline.workflow, pipeline.StateGraph)
+    assert isinstance(app.checkpointer, pipeline.InMemorySaver)  # mémoire de session
     node_names = set(app.get_graph().nodes.keys())
     assert {"rag", "rag_tools", "scraper", "scraper_tools", "narration"} <= node_names

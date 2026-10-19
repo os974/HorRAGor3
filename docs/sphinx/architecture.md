@@ -39,6 +39,7 @@ flowchart LR
         apidon[API Données]
     end
     apiia -- "traces de l'agent<br/>(langfuse_ingest)" --> langfuse[Langfuse :3000]
+    apidon -- "traces<br/>(langfuse_data_ingest, interne)" --> langfuse
     prometheus[Prometheus :9090] -- "/metrics" --> apiia & apidon & traefik
     grafana[Grafana :3002] --> prometheus
     kuma[Uptime Kuma :3001] -- "10 sondes" --> cluster
@@ -53,10 +54,13 @@ Les interfaces d'administration (ports ci-dessus) ne sont liées qu'à
 |---|---|
 | Base encapsulée derrière son API, réseau privé étanche | `db` sur `db_net` (internal), seul `api-donnees` y accède, avec un rôle en lecture seule |
 | API IA parlant exclusivement à l'API Données par le réseau privé | `data_net` (internal) ; `api-ia` ne détient aucun identifiant de base |
-| Authentification robuste par Refresh Tokens | JWT access (15 min) + refresh (12 h) avec rotation et révocation sur rejeu |
+| Communication entre services sécurisée par Refresh Tokens liés au compte | JWT access (15 min) + refresh (12 h) avec rotation et révocation sur rejeu ; l'API IA relaie le jeton de l'utilisateur à l'API Données, qui le vérifie |
 | UI isolée, communication chiffrée vers l'API IA | front sur `front_net` (internal) : son seul chemin vers l'IA est Traefik en TLS vérifié |
 | Infrastructure souveraine | base, Langfuse et monitoring conteneurisés ; aucune télémétrie éditeur ; seul Ollama (GPU) reste sur l'hôte |
 | Monitoring 360° | Prometheus + Grafana + Uptime Kuma (3 couches) et Langfuse (agent) |
+| Traçabilité des requêtes | une trace Langfuse par requête métier sur les deux API, rattachée au compte et à la conversation ; le graphe de `/chat` s'y imbrique |
+| Mémoire de session fiable | checkpointer LangGraph par conversation (compte + `session_id`), reducers qui n'écrasent rien, fenêtre des 3 derniers échanges |
+| Infrastructure montée en une commande | `docker compose up -d` : conteneurs one-shot `certs-init` (certificats) et `kuma-setup` (sondes) |
 | Journalisation de bout en bout | Loguru dans les deux API et l'UI (uvicorn compris), logs JSON portant `session_id` et `request_id` ; un `session_id` par conversation, partagé avec les traces Langfuse |
 
 Le détail fichier par fichier, dans l'ordre du flux d'une requête, se trouve

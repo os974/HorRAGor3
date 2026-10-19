@@ -12,13 +12,15 @@ Trois capacités :
       synopsis) + enrichissement TMDB best-effort (réalisateur, casting) ;
     - :func:`find_similar_horror_movies` — pgvector : recommandations.
 
-Singletons injectables (``set_index`` / ``set_repository``) : l'API injecte
-l'index FAISS au démarrage (lifespan) ; le repository est construit au premier
-appel selon ``settings.data_api_url`` (client de l'API Données en cluster, SQL
-direct en dev). Les tests injectent des fakes.
+Dépendances fournies par deux fabriques en cache (:func:`get_index`,
+:func:`get_repository`), sans variable globale : l'API charge l'index FAISS
+au démarrage (lifespan) ; le repository est construit au premier appel selon
+``settings.data_api_url`` (client de l'API Données en cluster, SQL direct en
+dev). Les tests remplacent les fabriques par des fakes.
 """
 
 import json
+from functools import lru_cache
 
 from langchain_core.tools import tool
 from loguru import logger
@@ -33,59 +35,34 @@ from src.data.faiss_index import TitleIndex, normalize_title
 from src.data.http_repository import HttpFilmRepository
 from src.data.repository import SqlFilmRepository
 
-_index: TitleIndex | None = None
-_repository: FilmRepository | None = None
 
+@lru_cache(maxsize=1)
+def get_index() -> TitleIndex:
+    """Fournit l'index FAISS des titres, chargé une seule fois depuis le disque.
 
-def set_index(index: TitleIndex) -> None:
-    """Injecte l'index FAISS déjà chargé (au démarrage de l'API, ou un fake en test).
-
-    Args:
-        index: Index des titres prêt à la recherche.
-    """
-    global _index
-    _index = index
-
-
-def set_repository(repository: FilmRepository) -> None:
-    """Injecte le repository SQL (au démarrage de l'API, ou un fake en test).
-
-    Args:
-        repository: Implémentation de FilmRepository.
-    """
-    global _repository
-    _repository = repository
-
-
-def _get_index() -> TitleIndex:
-    """Renvoie l'index injecté, ou le charge paresseusement depuis le disque.
+    L'API l'appelle au démarrage (lifespan) pour le monter en RAM ; les tests
+    remplacent la fabrique par un fake (``monkeypatch``).
 
     Returns:
         L'index FAISS des titres.
     """
-    global _index
-    if _index is None:
-        _index = TitleIndex.load()
-    return _index
+    return TitleIndex.load()
 
 
-def _get_repository() -> FilmRepository:
-    """Renvoie le repository injecté, ou en crée un selon la config.
+@lru_cache(maxsize=1)
+def get_repository() -> FilmRepository:
+    """Fournit le repository films, construit une seule fois selon la config.
 
     En cluster (``settings.data_api_url`` définie), la couche IA passe par
     l'API Données via HTTP — elle ne connaît pas ``DATABASE_URL``. En dev
-    (URL vide), accès direct Supabase comme en Partie 2.
+    (URL vide), accès SQL direct comme en Partie 2.
 
     Returns:
         Le repository films actif.
     """
-    global _repository
-    if _repository is None:
-        if settings.data_api_url:
-            _repository = HttpFilmRepository()
-        else:
-            _repository = SqlFilmRepository()
-    return _repository
+    if settings.data_api_url:
+        return HttpFilmRepository()
+    return SqlFilmRepository()
 
 
 def validate_film(title: str) -> FilmRef | None:
@@ -104,7 +81,7 @@ def validate_film(title: str) -> FilmRef | None:
         d'erreur technique (jamais d'exception).
     """
     try:
-        index = _get_index()
+        index = get_index()
         trace.record("embed", "embed_text", f"{settings.embedding_model} : {title!r} → vecteur")
         vector = embed_text(normalize_title(title))
         results = index.search_vector(vector, k=1)
@@ -146,7 +123,7 @@ def query_movie_metadata(film_id: int) -> FilmMetadata | None:
         d'erreur technique (jamais d'exception).
     """
     try:
-        metadata = _get_repository().get_metadata(film_id)
+        metadata = get_repository().get_metadata(film_id)
     except Exception as exc:  # noqa: BLE001
         logger.warning("query_movie_metadata({}) en échec technique : {}", film_id, exc)
         trace.record("sql", "get_metadata", f"id={film_id} → erreur technique")
@@ -177,7 +154,7 @@ def find_similar_horror_movies(film_id: int, k: int = 5) -> list[FilmRef]:
         pgvector).
     """
     try:
-        return _get_repository().recommend_similar(film_id, k)
+        return get_repository().recommend_similar(film_id, k)
     except Exception as exc:  # noqa: BLE001
         logger.warning("find_similar_horror_movies({}) en échec technique : {}", film_id, exc)
         trace.record("pgvector", "recommend_similar", f"id={film_id} → erreur technique")

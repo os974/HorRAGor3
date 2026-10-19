@@ -8,6 +8,10 @@ contrat que :class:`~src.data.repository.SqlFilmRepository`, donc
 interchangeable sans toucher aux outils (``rag_tool`` choisit selon
 ``settings.data_api_url``).
 
+Chaque appel porte le jeton d'accès de l'utilisateur à l'origine de la
+requête (relayé par l'API IA, voir :func:`src.auth.forwarding_access_token`) :
+l'API Données refuse tout appel anonyme.
+
 Les erreurs réseau/HTTP remontent en exceptions httpx : c'est ``rag_tool``
 qui applique le contrat « jamais d'exception » de la couche outils.
 """
@@ -15,10 +19,21 @@ qui applique le contrat « jamais d'exception » de la couche outils.
 import httpx
 
 from src import trace
+from src.auth import forwarded_access_token
 from src.config import settings
 from src.contracts.schemas import FilmMetadata, FilmRef
 
 _TIMEOUT = 15.0
+
+
+def _auth_headers() -> dict[str, str]:
+    """En-tête d'autorisation : le jeton de l'utilisateur de la requête en cours.
+
+    Returns:
+        ``{"Authorization": "Bearer …"}``, ou un dict vide hors requête.
+    """
+    token = forwarded_access_token()
+    return {"Authorization": f"Bearer {token}"} if token else {}
 
 
 class HttpFilmRepository:
@@ -45,7 +60,9 @@ class HttpFilmRepository:
         Raises:
             httpx.HTTPError: API Données injoignable ou en erreur (503...).
         """
-        resp = httpx.get(f"{self._base_url}/films/{film_id}", timeout=_TIMEOUT)
+        resp = httpx.get(
+            f"{self._base_url}/films/{film_id}", headers=_auth_headers(), timeout=_TIMEOUT
+        )
         if resp.status_code == 404:
             trace.record("sql", "get_metadata", f"id={film_id} → introuvable (API Données)")
             return None
@@ -69,6 +86,7 @@ class HttpFilmRepository:
         resp = httpx.get(
             f"{self._base_url}/films/{film_id}/similar",
             params={"k": k},
+            headers=_auth_headers(),
             timeout=_TIMEOUT,
         )
         resp.raise_for_status()

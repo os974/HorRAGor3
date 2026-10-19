@@ -7,7 +7,7 @@ de la suite : c'est le routeur `should_scrape_or_narrate` qui juge sa récolte.
 | | |
 |---|---|
 | Nœud | `rag`, avec sa micro-boucle `rag ⇄ rag_tools` |
-| Lit dans le `State` | `question`, `rag_messages` (son propre canal) |
+| Lit dans le `State` | `question`, `rag_messages` (son propre canal), un résumé de `history` (relances) |
 | Écrit dans le `State` | `rag_messages` ; `lore` en fin de fouille ; `path` à la première visite |
 | Outils | `lookup_movie` (FAISS → SQL + TMDB : le dossier du film), `find_similar` (pgvector : recommandations) |
 | LLM | `qwen2.5:7b`, température 0 (choix d'outils reproductibles) |

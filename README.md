@@ -10,6 +10,9 @@ un `State` commun, sans manager central :
 
 Flux : `START → rag → [routeur] → (narration | scraper → narration) → END`
 
+Chaque conversation garde une mémoire de session (relances comprises), liée au
+compte connecté ; chaque requête métier produit une trace Langfuse.
+
 ## Documentation
 
 - **Brief** : `docs/HorRAGor BOT Partie 3.pdf`
@@ -58,16 +61,21 @@ uv run uvicorn services.data_api.main:app --port 8100
 
 Endpoints de l'API IA : `GET /health`, `GET /metrics` (Prometheus), `POST /auth/login`,
 `POST /auth/refresh`, `POST /chat` (JWT requis). API Données : `GET /films/{id}`,
-`GET /films/{id}/similar`, `/health`, `/metrics`.
+`GET /films/{id}/similar` (jeton de l'utilisateur, relayé par l'API IA), `/health`
+(base comprise), `/metrics`.
 
 ## Lancement en cluster (Docker)
 
 ```bash
-./scripts/gen_certs.sh     # une fois : CA locale + certificat TLS
 ./scripts/dump_supabase.sh # une fois : dump de la base source (lit DATABASE_URL)
 docker compose up -d --build
 docker compose ps          # les 15 conteneurs doivent être « healthy »
 ```
+
+`docker compose up -d` monte tout le cluster et son observabilité : les
+conteneurs one-shot `certs-init` (CA locale et certificat TLS, générés s'ils
+manquent) et `kuma-setup` (compte admin et sondes Uptime Kuma) préparent le
+reste, à chaque démarrage et sans effet s'il n'y a rien à faire.
 
 Arrêt : `docker compose down` (les volumes, donc la base et les traces, sont
 conservés ; `docker compose down -v` les supprime).
@@ -96,8 +104,6 @@ Monitoring 360° (interfaces sur la boucle locale uniquement) :
 | Grafana | http://localhost:3002 | dashboard « HorRAGor3 — les 3 couches » | `admin` / `GRAFANA_ADMIN_PASSWORD` |
 | Prometheus | http://localhost:9090 | métriques brutes (APIs + Traefik) | — |
 
-Au premier lancement, créer les sondes Uptime Kuma :
-`uv run --env-file .env --with uptime-kuma-api==1.2.1 python scripts/setup_uptime_kuma.py`.
 
 ## Documentation (Sphinx)
 
@@ -107,15 +113,15 @@ En ligne (publiée par le CD à chaque merge sur `main`) : https://os974.github.
 uv run --group docs sphinx-build -W -b html docs/sphinx docs/sphinx/_build/html
 ```
 
-Doc automatique des deux API (endpoints générés depuis OpenAPI), schémas
-relationnels (MCD/MLD/MPD), cartographie du graphe générée depuis
-`src/graph/pipeline.py` avec une page par agent, le livre du projet
+Doc automatique des deux API (endpoints générés depuis OpenAPI), l'interface
+Streamlit, schémas relationnels (MCD/MLD/MPD), cartographie du graphe générée
+depuis `src/graph/pipeline.py` avec une page par agent, le livre du projet
 (`docs/lifecycle.md`) et le guide de la console.
 
 ## Tests
 
 ```bash
-uv run pytest --cov        # 123 tests hermétiques (ni Ollama, ni réseau), verrou à 80 %
+uv run pytest --cov        # 144 tests hermétiques (ni Ollama, ni réseau), verrou à 80 %
 uv run ruff check . && uv run ruff format --check .
 ```
 
@@ -147,3 +153,6 @@ CI/CD GitHub Actions :
 - [x] Vérification finale contre la lettre du brief (tickets #22–#25, livre ch. 17) : règle de
   suffisance dans `router.py`, `app = workflow.compile()`, corrélation par conversation, Loguru
   de bout en bout, index FAISS reproductible, analyse Langfuse chiffrée
+- [x] Conformité au texte du rendu (tickets #27–#32, livre ch. 18) : mémoire de session liée au
+  compte, jeton relayé jusqu'à l'API Données, une trace Langfuse par requête, cluster en une
+  commande, plus de variables globales, page Sphinx de l'interface

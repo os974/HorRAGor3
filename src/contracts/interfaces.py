@@ -15,11 +15,13 @@ from src.contracts.schemas import ChatRequest, ChatResponse, FilmMetadata, FilmR
 class AgentEngine(Protocol):
     """Ce que l'API appelle pour obtenir une réponse (mock ou graphe réel)."""
 
-    async def run(self, req: ChatRequest) -> ChatResponse:
+    async def run(self, req: ChatRequest, user: str = "anonyme") -> ChatResponse:
         """Traite une requête de chat de bout en bout.
 
         Args:
             req: Message utilisateur et identifiant de session.
+            user: Le compte authentifié : la mémoire de la conversation et les
+                traces lui sont rattachées.
 
         Returns:
             La réponse complète (narration, sources, parcours, trace).

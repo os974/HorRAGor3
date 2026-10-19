@@ -4,19 +4,20 @@ import sys
 import types
 
 import pytest
+from langchain_core.messages import AIMessage, HumanMessage
+from langgraph.checkpoint.memory import InMemorySaver
 from langgraph.errors import GraphRecursionError
 
 from src import trace
 from src.config import settings
 from src.contracts.schemas import ChatRequest, TraceStep
 from src.engine import FALLBACK_ANSWER, GraphEngine, _langfuse_callbacks
+from src.graph.pipeline import build_workflow
 
 
 @pytest.fixture(autouse=True)
 def _isole_le_monitoring(monkeypatch, tmp_path):
-    """Neutralise Langfuse (clés vides) et détourne le journal des runs."""
-    monkeypatch.setattr(settings, "langfuse_public_key", "")
-    monkeypatch.setattr(settings, "langfuse_secret_key", "")
+    """Langfuse neutralisé (conftest) ; journal des runs détourné."""
     _langfuse_callbacks.cache_clear()
     monkeypatch.setattr(trace, "_LOG_PATH", tmp_path / "traces.jsonl")
     yield
@@ -93,7 +94,7 @@ def test_langfuse_active_avec_cles(monkeypatch):
     _with_keys(monkeypatch)
     clients = []
     fake_sdk = types.ModuleType("langfuse")
-    fake_sdk.Langfuse = lambda **kwargs: clients.append(kwargs)
+    fake_sdk.Langfuse = lambda **kwargs: clients.append(kwargs) or object()
     fake_integration = types.ModuleType("langfuse.langchain")
     fake_integration.CallbackHandler = lambda: "handler"
     monkeypatch.setitem(sys.modules, "langfuse", fake_sdk)
@@ -116,3 +117,57 @@ async def test_config_invoke_sans_monitoring():
     config = GraphEngine._invoke_config(ChatRequest(message="q"))
     assert "callbacks" not in config
     assert config["recursion_limit"] > 0
+
+
+def _memory_graph():
+    """Graphe réel à mémoire (checkpointer), nœuds factices sans LLM."""
+
+    def rag(state):
+        return {"lore": "" if "anecdotes" in state["question"] else "lore", "path": ["rag"]}
+
+    def scraper(state):
+        return {"web_findings": "web", "path": ["scraper"]}
+
+    def narration(state):
+        story = f"récit {len(state.get('history') or []) // 2 + 1}"
+        return {
+            "story": story,
+            "path": ["narration"],
+            "history": [HumanMessage(state["question"]), AIMessage(story)],
+        }
+
+    workflow = build_workflow(rag=rag, scraper=scraper, narration=narration)
+    return workflow.compile(checkpointer=InMemorySaver())
+
+
+async def test_memoire_de_session_entre_deux_tours():
+    """Même conversation : l'historique persiste, le dossier du tour repart de zéro."""
+    graph = _memory_graph()
+    engine = GraphEngine(graph=graph)
+
+    first = await engine.run(ChatRequest(message="des anecdotes ?", session_id="s1"), "olivier")
+    second = await engine.run(ChatRequest(message="Parle-moi d'Alien", session_id="s1"), "olivier")
+
+    assert first.path == ["rag", "scraper", "narration"]
+    assert second.path == ["rag", "narration"]  # le parcours ne s'accumule pas
+    assert second.answer == "récit 2"  # la plume a vu un échange précédent
+    state = graph.get_state({"configurable": {"thread_id": "olivier:s1"}}).values
+    assert state["web_findings"] == ""  # trouvailles du tour 1 effacées
+    assert len(state["history"]) == 4
+
+
+async def test_memoire_liee_au_compte():
+    """Même session_id, autre compte : aucune mémoire partagée."""
+    graph = _memory_graph()
+    engine = GraphEngine(graph=graph)
+
+    await engine.run(ChatRequest(message="Parle-moi d'Alien", session_id="s1"), "olivier")
+    other = await engine.run(ChatRequest(message="Parle-moi d'Alien", session_id="s1"), "intrus")
+
+    assert other.answer == "récit 1"  # l'intrus repart d'une conversation vierge
+
+
+def test_config_rattache_la_conversation_au_compte():
+    """thread_id = compte + session_id."""
+    config = GraphEngine._invoke_config(ChatRequest(message="q", session_id="s1"), "olivier")
+    assert config["configurable"]["thread_id"] == "olivier:s1"

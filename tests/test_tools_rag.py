@@ -34,9 +34,14 @@ class FakeRepository:
         return self._similar
 
 
+def _use_repository(monkeypatch, repository):
+    """Remplace la fabrique du repository par un fake."""
+    monkeypatch.setattr(rag_tool, "get_repository", lambda: repository)
+
+
 def _use_index(monkeypatch, results):
     """Installe un faux index + un faux embedding (pas d'Ollama)."""
-    rag_tool.set_index(FakeIndex(results))
+    monkeypatch.setattr(rag_tool, "get_index", lambda: FakeIndex(results))
     monkeypatch.setattr(rag_tool, "embed_text", lambda text: [0.0, 1.0])
 
 
@@ -61,7 +66,7 @@ def test_validate_film_sans_resultat(monkeypatch):
 
 def test_validate_film_jamais_d_exception(monkeypatch):
     """Panne d'embedding (Ollama éteint) → None + log, jamais d'exception."""
-    rag_tool.set_index(FakeIndex([]))
+    monkeypatch.setattr(rag_tool, "get_index", lambda: FakeIndex([]))
 
     def boom(text):
         raise ConnectionError("Ollama éteint")
@@ -73,7 +78,7 @@ def test_validate_film_jamais_d_exception(monkeypatch):
 def test_query_metadata_delegue_au_repository(monkeypatch):
     """Le lore vient du repository ; sans token TMDB, pas d'enrichissement."""
     meta = FilmMetadata(id=41, title="Hereditary", release_year=2018)
-    rag_tool.set_repository(FakeRepository(metadata=meta))
+    _use_repository(monkeypatch, FakeRepository(metadata=meta))
     monkeypatch.setattr(settings, "tmdb_token", "")
     assert rag_tool.query_movie_metadata(41) == meta
 
@@ -81,7 +86,7 @@ def test_query_metadata_delegue_au_repository(monkeypatch):
 def test_query_metadata_enrichissement_tmdb_best_effort(monkeypatch):
     """TMDB en panne → les faits de la base restent intacts."""
     meta = FilmMetadata(id=41, title="Hereditary", tmdb_id=99)
-    rag_tool.set_repository(FakeRepository(metadata=meta))
+    _use_repository(monkeypatch, FakeRepository(metadata=meta))
     monkeypatch.setattr(settings, "tmdb_token", "tok")
 
     def boom(tmdb_id, top_cast=5):
@@ -92,23 +97,24 @@ def test_query_metadata_enrichissement_tmdb_best_effort(monkeypatch):
     assert out.title == "Hereditary" and out.director is None
 
 
-def test_query_metadata_jamais_d_exception():
+def test_query_metadata_jamais_d_exception(monkeypatch):
     """Base injoignable → None, pas d'exception."""
-    rag_tool.set_repository(FakeRepository(error=RuntimeError("DB down")))
+    _use_repository(monkeypatch, FakeRepository(error=RuntimeError("DB down")))
     assert rag_tool.query_movie_metadata(41) is None
 
 
-def test_find_similar_degrade_en_liste_vide():
+def test_find_similar_degrade_en_liste_vide(monkeypatch):
     """pgvector indisponible (ex. repli SQLite) → []."""
-    rag_tool.set_repository(FakeRepository(error=RuntimeError("no pgvector")))
+    _use_repository(monkeypatch, FakeRepository(error=RuntimeError("no pgvector")))
     assert rag_tool.find_similar_horror_movies(41) == []
 
 
 def test_wrapper_lookup_movie_found_true(monkeypatch):
     """Le @tool compose validate → metadata et marque "found": true."""
     _use_index(monkeypatch, [(0.99, 41, "Hereditary")])
-    rag_tool.set_repository(
-        FakeRepository(metadata=FilmMetadata(id=41, title="Hereditary", release_year=2018))
+    _use_repository(
+        monkeypatch,
+        FakeRepository(metadata=FilmMetadata(id=41, title="Hereditary", release_year=2018)),
     )
     monkeypatch.setattr(settings, "tmdb_token", "")
     out = rag_tool.lookup_movie.invoke({"title": "hereditary"})
@@ -125,7 +131,7 @@ def test_wrapper_lookup_movie_found_false(monkeypatch):
 def test_wrapper_find_similar(monkeypatch):
     """Recommandations trouvées → "found": true et titres listés."""
     _use_index(monkeypatch, [(0.99, 42, "Midsommar")])
-    rag_tool.set_repository(FakeRepository(similar=[FilmRef(id=1, title="Mara")]))
+    _use_repository(monkeypatch, FakeRepository(similar=[FilmRef(id=1, title="Mara")]))
     out = rag_tool.find_similar.invoke({"title": "Midsommar"})
     assert '"found": true' in out and "Mara" in out
 
@@ -133,6 +139,6 @@ def test_wrapper_find_similar(monkeypatch):
 def test_wrapper_find_similar_sans_reco(monkeypatch):
     """Aucune recommandation → "found": false."""
     _use_index(monkeypatch, [(0.99, 42, "Midsommar")])
-    rag_tool.set_repository(FakeRepository(similar=[]))
+    _use_repository(monkeypatch, FakeRepository(similar=[]))
     out = rag_tool.find_similar.invoke({"title": "Midsommar"})
     assert '"found": false' in out
