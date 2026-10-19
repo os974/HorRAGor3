@@ -1,0 +1,40 @@
+erDiagram
+    FILM ||--o{ MOVIE_GENRES : "classe"
+    GENRE ||--o{ MOVIE_GENRES : "regroupe"
+    FILM ||--o{ RATING : "note"
+    FILM ||--o{ MOVIE_KEYWORDS : "decrit"
+    FILM ||--o{ SOURCES_METADATA : "trace"
+    FILM {
+        int id PK
+        int tmdb_id UK
+        string imdb_id UK
+        string title
+        date release_date
+        bigint budget
+        bigint revenue
+    }
+    GENRE {
+        int id PK
+        string name UK
+    }
+    MOVIE_GENRES {
+        int movie_id PK,FK
+        int genre_id PK,FK
+    }
+    RATING {
+        int id PK
+        int movie_id FK
+        string source
+        float score
+        float audience_score
+    }
+    MOVIE_KEYWORDS {
+        int movie_id PK,FK
+        string keyword PK
+    }
+    SOURCES_METADATA {
+        int id PK
+        int movie_id FK
+        string source_name
+        datetime ingested_at
+    }
