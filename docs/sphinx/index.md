@@ -6,9 +6,10 @@ peer-to-peer sous LangGraph** (Chercheur local, Enquêteur web, Écrivain
 gothique), puis l'industrialise : microservices Docker isolés, authentification
 par Refresh Tokens, monitoring à 360°, CI/CD.
 
-Cette documentation couvre les trois contenus exigés par le brief :
+Cette documentation couvre les contenus exigés par le brief :
 
 - la **documentation automatique des deux API** (Intelligence et Données) ;
+- l'**interface** Streamlit ;
 - les **schémas relationnels** de la base de données ;
 - la **cartographie complète du graphe multi-agent**.
 
@@ -31,6 +32,7 @@ console
 
 api_ia
 api_donnees
+interface
 bdd
 outils
 ```

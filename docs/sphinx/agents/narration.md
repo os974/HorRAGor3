@@ -8,7 +8,7 @@ d'historique, seulement le dossier factuel.
 |---|---|
 | Nœud | `narration` |
 | Lit dans le `State` | `question`, `lore`, `web_findings` — aucun canal de messages |
-| Écrit dans le `State` | `story` (la réponse), `path` |
+| Écrit dans le `State` | `story` (la réponse), `path`, et l'échange du tour dans `history` (la mémoire de session) |
 | Outils | aucun |
 | LLM | `qwen2.5:7b`, température 0,7 (la seule créative du graphe) |
 | Suite | `END` |

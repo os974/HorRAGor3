@@ -19,7 +19,7 @@ app_frontend.py (Streamlit) — un session_id par conversation
 src/main.py (FastAPI) → src/engine.py (GraphEngine)
    │ ChatRequest → AgentEngine.run()
    ▼
-src/graph/pipeline.py (app = workflow.compile())
+src/graph/pipeline.py (app = workflow.compile(...), mémoire par conversation)
    │ State initial {question}
    ▼
 rag_node ⇄ rag_tools (fouille locale : FAISS, puis base via l'API Données)
@@ -149,10 +149,12 @@ la suite (ex. récolte locale vide → Scraper).
   alors enquêter le Scraper). `query_movie_metadata` va chercher le lore en SQL
   avec cet id (seule source autorisée pour les faits — 0 hallucination) et
   enrichit réalisateur/casting via TMDB en best-effort. `find_similar_horror_movies`
-  interroge pgvector (contenu des synopsis, pas les titres). Singletons
-  injectables (`set_index`/`set_repository`) : l'API injecte l'index FAISS au
-  démarrage, le repository est construit au premier appel (client de l'API
-  Données en cluster, SQL direct en dev), les tests injectent des fakes.
+  interroge pgvector (contenu des synopsis, pas les titres). L'index et le
+  repository viennent de deux fabriques en cache (`get_index`,
+  `get_repository`, sans variable globale depuis le chapitre 18) : l'API monte
+  l'index au démarrage, le repository est construit au premier appel (client
+  de l'API Données en cluster, SQL direct en dev), les tests les remplacent
+  par des fakes.
 
 ### `src/tools/scraper_tool.py` — l'outil de l'Agent Scraper (Enquêteur du Web)
 - **Entrées** : un titre (Wikipédia) ou une requête libre (DuckDuckGo).
@@ -180,8 +182,9 @@ Une requête y entre comme une `question` et en ressort comme une `story`.
   l'isolation de contexte du brief : chaque agent ne voit que sa propre
   micro-conversation, la Narration ne voit aucun message. Les autres cases du
   dossier : `lore` (faits locaux, que le routeur juge), `web_findings` (faits
-  web), `story` (récit final), `path` (nœuds traversés, reducer
-  `operator.add`).
+  web), `story` (récit final), `path` (nœuds traversés du tour). Depuis le
+  chapitre 18, s'y ajoute `history`, la mémoire de la conversation (les trois
+  derniers échanges), seule case qui survit d'une question à l'autre.
 
 ### `src/graph/nodes.py` — les Ouvriers (la logique métier)
 - **Entrées** : `state` (paramètre unique, règle d'or du brief).
@@ -220,7 +223,8 @@ Une requête y entre comme une `question` et en ressort comme une `story`.
 ### `src/graph/pipeline.py` — l'Ingénieur Système (le câblage)
 - **Entrées** : nœuds + routeurs (injectables pour les tests).
 - **Sorties** : le fichier se termine par `workflow = build_workflow()` puis
-  `app = workflow.compile()` — le livrable du brief, importé par FastAPI. Les
+  `app = workflow.compile(...)` — le livrable du brief, importé par FastAPI,
+  compilé avec un checkpointer depuis le chapitre 18 (mémoire de session). Les
   tests passent par `build_graph(...)`, qui compile un graphe aux nœuds
   injectés.
 - **Ce qui s'y passe** : le point de vérité de la topologie, via les trois
@@ -266,7 +270,9 @@ La requête traverse maintenant tout le système, du navigateur au récit.
   naissance (prometheus-fastapi-instrumentator — règle observabilité) ;
   `/chat` délègue au moteur via l'abstraction `AgentEngine` (inversion de
   dépendance : les tests injectent un fake) et pose `session_id` et un
-  `request_id` dans le contexte Loguru (chapitre 17). Lancement :
+  `request_id` dans le contexte Loguru (chapitre 17). Depuis le chapitre 18,
+  il relaie aussi le jeton du visiteur à l'API Données, et chaque requête
+  métier ouvre une trace Langfuse. Lancement :
   `uv run uvicorn src.main:app --reload`.
 
 ### `src/engine.py` — le pont contrat ↔ graphe (GraphEngine)
@@ -386,7 +392,9 @@ directement par la couche IA.
   `DATABASE_URL` (Supabase encapsulé à ce stade ; décision révisée au
   chapitre 9 : la base elle-même rejoint le cluster). Réutilise `SqlFilmRepository` tel quel,
   Loguru, Instrumentator, repository injectable pour les tests. En cluster
-  (G3), ce service n'aura **aucun port publié**.
+  (G3), ce service n'aura **aucun port publié**. *(Depuis le chapitre 18, ses
+  routes `/films/*` exigent en plus le jeton de l'utilisateur, relayé par
+  l'API IA.)*
 
 ### `src/data/http_repository.py` — le client côté IA
 - **Entrées** : les appels de `rag_tool` (get_metadata, recommend_similar).
@@ -697,12 +705,14 @@ UIs : 127.0.0.1 → Langfuse :3000 · Kuma :3001 · Grafana :3002 · Prometheus 
 
 ### `scripts/setup_uptime_kuma.py` — les sondes, as code aussi
 - Uptime Kuma n'a pas de provisioning par fichier : le script (idempotent,
-  `uv run --env-file .env --with uptime-kuma-api`) crée le compte admin puis
+  lancé depuis le chapitre 18 par le conteneur one-shot `kuma-setup` à chaque
+  `docker compose up`) crée le compte admin puis
   10 sondes (la 10ᵉ, Ollama via le relais, ajoutée au chapitre 16) — les
   deux **entrées publiques en TLS vérifié** (Kuma fait confiance à la CA
   locale via `NODE_EXTRA_CA_CERTS`), Streamlit, API IA, API Données, la
-  **chaîne API → Postgres** (sonde à mot-clé : `/films/41` doit contenir
-  « Hereditary »), Langfuse, Prometheus, Grafana.
+  **chaîne API → Postgres** (sonde à mot-clé : `/films/41` devait contenir
+  « Hereditary » ; depuis que `/films/*` exige un jeton, elle lit `/health`,
+  qui interroge la base — chapitre 18), Langfuse, Prometheus, Grafana.
 
 **Vu en réel** (2026-10-19) : 14 conteneurs démarrés par une seule commande
 (15 avec le relais Ollama du chapitre 16) ;
@@ -842,8 +852,9 @@ https://github.com/os974/HorRAGor3/issues, labellisés par nature
 (`anomalie`, `comportement-déviant`, `sécurité`) et par couche (`données`,
 `intelligence`, `cluster`, `observabilité`, `ci-cd`), chacun clos avec la
 référence de son correctif. Puis #19, ouvert au premier passage du CD
-(chapitre 13) et clos par la PR #20 ; enfin #22 à #25, les écarts de la
-vérification finale (chapitre 17).
+(chapitre 13) et clos par la PR #20 ; puis #22 à #25, les écarts de la
+vérification finale (chapitre 17) ; enfin #27 à #32, la conformité au texte
+du rendu (chapitre 18).
 
 ---
 
@@ -1035,5 +1046,106 @@ conteneur du Front journalisée « Connexion refusée par l'API (HTTP 401) » ;
 `scripts/build_faiss.py --limit 300` : 300 titres en 33 s, « Get Out »
 retrouvé avec un score de 1,000 ; 123 tests, couverture 96 % (API IA 95 %,
 API Données 95 %, UI 99 %).
+
+*Fin de la vérification finale.*
+
+---
+
+## Chapitre 18 — Le rendu : la conformité au texte d'évaluation
+
+Le texte qui accompagne le rendu reformule le brief avec des critères plus
+précis : « mémoire de session fiable », « communication entre services
+sécurisée avec des refresh tokens liés au compte utilisateur », « 100 % des
+requêtes HTTP » tracées dans Langfuse, l'infrastructure montée « en une seule
+commande », un code « sans variables globales cachées », une documentation qui
+décrit aussi l'interface. Six écarts, six tickets (#27 à #32), six correctifs.
+
+### La mémoire de session (#32)
+- **Le critère** : un `State` mis à jour sans écraser les données
+  précédentes, « garantissant une mémoire de session fiable ». Jusque-là,
+  chaque question repartait d'un état vide : une relance comme « Et qui l'a
+  réalisé ? » ne savait pas de quel film on parlait.
+- **`src/graph/pipeline.py`** : le graphe est compilé avec un checkpointer
+  (`InMemorySaver`). Chaque conversation est un `thread_id` = compte +
+  `session_id` : un visiteur ne peut pas reprendre la conversation d'un autre,
+  même en devinant son identifiant.
+- **`src/models/state.py`** : un canal `history` (reducer
+  `keep_recent_exchanges` : les trois derniers échanges) ; `path` passe au
+  reducer `extend_path` (une liste vide ouvre un nouveau tour).
+- **`src/engine.py`** : à chaque question, les canaux des agents et le
+  dossier du tour précédent repartent à zéro (`RemoveMessage`), pour que le
+  context trimming tienne sur toute la conversation. Seul `history` survit.
+- **`src/graph/nodes.py`** : le Chercheur et l'Enquêteur reçoivent un résumé
+  des échanges précédents (réponses tronquées à 300 caractères) ; la
+  Narration, toujours isolée, consigne l'échange du tour.
+- Limite assumée : la mémoire vit dans le processus de l'API IA, comme le
+  registre des refresh tokens ; un redémarrage l'efface.
+
+### Le jeton de l'utilisateur, relayé jusqu'à l'API Données (#28)
+- **Avant** : le verrou JWT protégeait l'IHM → API IA ; l'API IA appelait
+  l'API Données sans jeton, protégée par le seul isolement réseau.
+- **`src/auth.py`** : `/chat` relaie l'access token présenté
+  (`forwarding_access_token`, un `ContextVar` qui suit la requête jusque dans
+  le thread du graphe et ses outils, comme la trace) ; valider un jeton
+  n'exige plus que `JWT_SECRET`, partagé par les deux API.
+- **`src/data/http_repository.py`** : chaque appel porte `Authorization:
+  Bearer` avec le jeton du visiteur.
+- **`services/data_api/main.py`** : `/films/*` exige ce jeton
+  (`require_access`) et sait pour quel compte il travaille. `/health`, sans
+  jeton, interroge la base (`SELECT 1`) : la sonde Uptime Kuma de la chaîne
+  API → Postgres la lit désormais.
+
+### Une trace Langfuse par requête (#29)
+- **`src/observability.py`** : le client Langfuse partagé (fail-open) et un
+  middleware qui ouvre une span racine par requête métier (méthode, route,
+  statut, service). Les sondes (`/health`, `/metrics`) et la doc OpenAPI ne
+  sont pas tracées : elles mesurent la machine, pas l'usage.
+- Pour `/chat`, le `CallbackHandler` imbrique le graphe dans la trace de sa
+  requête, qui porte le compte, la conversation, la question et le récit :
+  Langfuse mesure ainsi les tokens **par utilisateur**, le besoin d'origine du
+  brief (estimer le coût d'infrastructure).
+- L'API Données trace aussi ses requêtes, rattachées au compte, par un réseau
+  interne dédié (`langfuse_data_ingest`) : la couche Données n'a toujours
+  aucune sortie.
+
+### Le cluster en une seule commande (#31)
+- **`docker/init.Dockerfile`** : l'outillage des conteneurs one-shot (l'image
+  `uv` du projet + `uptime-kuma-api` et Loguru épinglés ; les scripts sont
+  montés en lecture seule depuis le dépôt).
+- **`certs-init`** : lance `scripts/gen_certs.sh` (idempotent), puis rend les
+  fichiers au propriétaire du projet ; Traefik, le front et Uptime Kuma
+  l'attendent (`service_completed_successfully`).
+- **`kuma-setup`** : lance `scripts/setup_uptime_kuma.py` dès qu'Uptime Kuma
+  est prêt ; le script ajoute les sondes absentes et met à jour celles qui
+  ont changé.
+- Restent prérequis : le `.env`, le dump de la base (il demande l'accès à la
+  base source) et Ollama sur l'hôte.
+
+### Les finitions
+- **Plus de variables globales (#30)** : l'index FAISS et le repository de
+  `rag_tool` viennent de fabriques en cache (`get_index`, `get_repository`),
+  comme `get_engine` de la couche data ; plus aucun mot-clé `global`. Seul
+  état de module restant, documenté : le registre des refresh actifs
+  (`src/auth.py`), indispensable à la révocation.
+- **L'interface dans Sphinx (#27)** : une page décrit le parcours du
+  visiteur, la conversation et sa mémoire, les fonctions du script, la
+  sécurité, l'observabilité et les tests de l'UI.
+
+**Vu en réel** (2026-10-19), cluster reconstruit sur ce code :
+- « Parle-moi du film Hereditary » → `rag → narration` en 22 s ; puis, dans la
+  même conversation, « Et qui l'a réalisé ? » → `rag → narration` en 6,7 s :
+  le Chercheur a retrouvé Hereditary grâce à l'échange précédent, la réponse
+  nomme Ari Aster ;
+- Langfuse : 5 traces pour ce scénario — `POST /auth/login`, deux
+  `POST /chat` (le graphe imbriqué, 12 observations chacun) et deux
+  `GET /films/41` de l'API Données — toutes rattachées à `olivier`, les deux
+  `/chat` dans la même session ;
+- API Données : sans jeton → 401, jeton forgé → 401, `/health` →
+  `{"status":"ok","db":"ok"}` ; toujours aucune sortie internet ;
+- `certs-init` sur un dossier vierge : CA et certificat générés, chaîne
+  vérifiée, fichiers rendus à `olivier` ; second passage sans effet ;
+- `docker compose up -d` sur le cluster : 15 services *healthy*, `kuma-setup`
+  a mis à jour la sonde de la chaîne, 10 sondes Uptime Kuma UP ;
+- 144 tests, couverture 95 % (API IA 95 %, API Données 93 %, UI 99 %).
 
 *Fin du projet.*

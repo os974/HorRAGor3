@@ -7,7 +7,7 @@ possède pas (anecdotes, coulisses, tournage…). Il creuse alors le web.
 | | |
 |---|---|
 | Nœud | `scraper`, avec sa micro-boucle `scraper ⇄ scraper_tools` |
-| Lit dans le `State` | `question`, `lore` (via un brief reformulé), `scraper_messages` (son propre canal) |
+| Lit dans le `State` | `question`, `lore` et un résumé de `history` (via un brief reformulé), `scraper_messages` (son propre canal) |
 | Écrit dans le `State` | `scraper_messages` ; `web_findings` en fin d'enquête ; `path` à la première visite |
 | Outils | `wikipedia_synopsis` (API REST Wikipédia), `web_search` (DuckDuckGo via `ddgs`, sans clé) |
 | LLM | `qwen2.5:7b`, température 0 |
