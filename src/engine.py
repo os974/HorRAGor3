@@ -89,7 +89,7 @@ class GraphEngine:
             logger.exception("Échec technique du graphe")
             trace.record("node", "engine", "échec technique")
             response = ChatResponse(answer=FALLBACK_ANSWER, trace=events)
-        trace.log_trace(req.message, response)
+        trace.log_trace(req.message, response, req.session_id)
         return response
 
     @staticmethod

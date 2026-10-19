@@ -62,6 +62,21 @@ def test_setup_logging_intercepte_la_stdlib():
     assert any("ping-stdlib" in line for line in captured)
 
 
+def test_setup_logging_rebranche_les_loggers_uvicorn():
+    """Les logs d'accès d'uvicorn (handlers propres, sans propagation) arrivent à Loguru."""
+    access = logging.getLogger("uvicorn.access")
+    access.addHandler(logging.NullHandler())  # comme le dictConfig d'uvicorn
+    access.propagate = False
+    setup_logging()
+    captured: list[str] = []
+    handler_id = logger.add(lambda message: captured.append(str(message)), level="INFO")
+    try:
+        access.info("GET /health 200")
+    finally:
+        logger.remove(handler_id)
+    assert any("GET /health 200" in line for line in captured)
+
+
 def test_setup_logging_idempotent():
     """Deux appels ne dupliquent pas les sorties (remove avant add)."""
     setup_logging()

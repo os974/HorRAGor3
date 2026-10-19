@@ -27,9 +27,10 @@ def test_log_trace_ecrit_une_ligne_json(monkeypatch, tmp_path):
     monkeypatch.setattr(trace, "_LOG_PATH", log_file)
     response = ChatResponse(answer="récit", path=["rag", "narration"])
 
-    trace.log_trace("question ?", response)
+    trace.log_trace("question ?", response, "sess-1")
 
     record = json.loads(log_file.read_text().strip())
+    assert record["session_id"] == "sess-1"  # corrélation avec Loguru/Langfuse
     assert record["question"] == "question ?"
     assert record["path"] == ["rag", "narration"]
 

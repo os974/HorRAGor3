@@ -18,6 +18,7 @@ instantané, en RAM) avec dégradation propre s'il est absent.
 
 from contextlib import asynccontextmanager
 from typing import Annotated
+from uuid import uuid4
 
 from fastapi import Depends, FastAPI
 from loguru import logger
@@ -90,6 +91,10 @@ async def health() -> dict[str, str]:
 async def chat(req: ChatRequest, engine: EngineDep, user: UserDep) -> ChatResponse:
     """Délègue la question au moteur multi-agent (route verrouillée par JWT).
 
+    Corrélation : ``session_id`` (la conversation, fourni par le Front) et un
+    ``request_id`` (cet appel) sont posés dans le contexte Loguru ; toutes les
+    lignes de log du run, graphe compris, les portent.
+
     Args:
         req: Message utilisateur et identifiant de session.
         engine: Le moteur injecté (GraphEngine, ou fake dans les tests).
@@ -98,5 +103,6 @@ async def chat(req: ChatRequest, engine: EngineDep, user: UserDep) -> ChatRespon
     Returns:
         La réponse complète (récit gothique, parcours, sources, trace).
     """
-    logger.info("POST /chat [{}] par {} : {!r}", req.session_id, user, req.message[:80])
-    return await engine.run(req)
+    with logger.contextualize(session_id=req.session_id, request_id=uuid4().hex[:8]):
+        logger.info("POST /chat [{}] par {} : {!r}", req.session_id, user, req.message[:80])
+        return await engine.run(req)
