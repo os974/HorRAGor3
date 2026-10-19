@@ -32,6 +32,7 @@ from src.contracts.schemas import ChatRequest, ChatResponse
 from src.data.faiss_index import TitleIndex
 from src.engine import get_engine
 from src.logging_conf import setup_logging
+from src.observability import LangfuseRequestMiddleware, tag_current_trace
 from src.tools.rag_tool import get_index
 
 # Un seul flux de logs pour toute l'app, uvicorn compris (règle : Loguru partout).
@@ -67,6 +68,9 @@ app = FastAPI(title="HorRAGor3 API", version="1.0.0", lifespan=lifespan)
 # /metrics Prometheus dès la naissance du service (règle observabilité) :
 # latences, comptes et statuts par route, prêts pour la stack de la Phase G.
 Instrumentator().instrument(app).expose(app)
+
+# Une trace Langfuse par requête métier ; le graphe de /chat s'y imbrique.
+app.add_middleware(LangfuseRequestMiddleware, service="api-ia")
 
 # /auth/login et /auth/refresh (JWT access + refresh — exigence du brief).
 app.include_router(auth_router)
@@ -110,4 +114,8 @@ async def chat(req: ChatRequest, engine: EngineDep, user: UserDep, token: TokenD
         forwarding_access_token(token),
     ):
         logger.info("POST /chat [{}] par {} : {!r}", req.session_id, user, req.message[:80])
-        return await engine.run(req, user)
+        response = await engine.run(req, user)
+    tag_current_trace(
+        user_id=user, session_id=req.session_id, input=req.message, output=response.answer
+    )
+    return response

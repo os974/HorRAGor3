@@ -149,10 +149,14 @@ services:
       DATABASE_URL: postgresql+psycopg://${POSTGRES_RO_USER:-horragor_ro}:${POSTGRES_RO_PASSWORD}@db:5432/${POSTGRES_DB:-horragor}
       # Même secret que l'API IA : vérifie le jeton de l'utilisateur qu'elle relaie.
       JWT_SECRET: ${JWT_SECRET:?JWT_SECRET manquant dans .env}
+      LANGFUSE_HOST: http://langfuse-web:3000
+      LANGFUSE_PUBLIC_KEY: ${LANGFUSE_PUBLIC_KEY}
+      LANGFUSE_SECRET_KEY: ${LANGFUSE_SECRET_KEY}
       LOG_LEVEL: ${LOG_LEVEL:-INFO}
     networks:
       - data_net
       - db_net
+      - langfuse_data_ingest # traces vers Langfuse, réseau interne sans sortie
     depends_on:
       db:
         condition: service_healthy

@@ -22,8 +22,7 @@ from langgraph.errors import GraphRecursionError
 from langgraph.graph.message import REMOVE_ALL_MESSAGES
 from loguru import logger
 
-from src import trace
-from src.config import settings
+from src import observability, trace
 from src.contracts.interfaces import AgentEngine
 from src.contracts.schemas import ChatRequest, ChatResponse
 from src.graph import pipeline
@@ -176,32 +175,23 @@ def _langfuse_callbacks() -> tuple:
     """Construit le CallbackHandler Langfuse une seule fois (fail-open).
 
     Règle observabilité du projet : l'application fonctionne à l'identique
-    sans Langfuse — clés absentes ou serveur éteint → tuple vide, zéro bruit
+    sans Langfuse — clés absentes ou SDK inutilisable → tuple vide, zéro bruit
     dans le run. SDK v3 : l'import vit dans ``langfuse.langchain`` (le snippet
-    v2 du brief n'est plus valide) et les clés sont passées au client
-    explicitement depuis ``settings`` (pas de ``os.environ`` en dur).
+    v2 du brief n'est plus valide) et le handler réutilise le client initialisé
+    par :func:`src.observability.langfuse_client`. Invoqué pendant une requête,
+    il imbrique le graphe dans la trace ouverte par le middleware HTTP.
 
     Returns:
         ``(handler,)`` si Langfuse est configuré et joignable, sinon ``()``.
     """
-    if not settings.langfuse_enabled:
-        logger.info("Langfuse désactivé (clés absentes du .env)")
+    if observability.langfuse_client() is None:
         return ()
     try:
-        from langfuse import Langfuse
         from langfuse.langchain import CallbackHandler
 
-        # Initialise le client global du SDK v3 avec nos réglages typés.
-        Langfuse(
-            public_key=settings.langfuse_public_key,
-            secret_key=settings.langfuse_secret_key,
-            host=settings.langfuse_host,
-        )
-        handler = CallbackHandler()
-        logger.info("Langfuse activé → {}", settings.langfuse_host)
-        return (handler,)
+        return (CallbackHandler(),)
     except Exception:  # noqa: BLE001 — le monitoring ne doit jamais bloquer le métier
-        logger.warning("Langfuse indisponible : monitoring désactivé (fail-open)")
+        logger.warning("CallbackHandler Langfuse indisponible (fail-open)")
         return ()
 
 

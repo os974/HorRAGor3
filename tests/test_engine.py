@@ -17,9 +17,7 @@ from src.graph.pipeline import build_workflow
 
 @pytest.fixture(autouse=True)
 def _isole_le_monitoring(monkeypatch, tmp_path):
-    """Neutralise Langfuse (clés vides) et détourne le journal des runs."""
-    monkeypatch.setattr(settings, "langfuse_public_key", "")
-    monkeypatch.setattr(settings, "langfuse_secret_key", "")
+    """Langfuse neutralisé (conftest) ; journal des runs détourné."""
     _langfuse_callbacks.cache_clear()
     monkeypatch.setattr(trace, "_LOG_PATH", tmp_path / "traces.jsonl")
     yield
@@ -96,7 +94,7 @@ def test_langfuse_active_avec_cles(monkeypatch):
     _with_keys(monkeypatch)
     clients = []
     fake_sdk = types.ModuleType("langfuse")
-    fake_sdk.Langfuse = lambda **kwargs: clients.append(kwargs)
+    fake_sdk.Langfuse = lambda **kwargs: clients.append(kwargs) or object()
     fake_integration = types.ModuleType("langfuse.langchain")
     fake_integration.CallbackHandler = lambda: "handler"
     monkeypatch.setitem(sys.modules, "langfuse", fake_sdk)

@@ -43,6 +43,10 @@ networks:
   # La porte de l'UI et de l'ingestion : api-ia y envoie ses traces,
   # Uptime Kuma y sonde la santé, l'UI y est publiée sur 127.0.0.1:3000.
   langfuse_ingest:
+  # L'ingestion de l'API Données, sans sortie : la couche Données envoie ses
+  # traces à Langfuse sans gagner d'accès à internet.
+  langfuse_data_ingest:
+    internal: true
 
 volumes:
   langfuse_postgres_data:
@@ -81,6 +85,7 @@ services:
     networks:
       - langfuse_net
       - langfuse_ingest
+      - langfuse_data_ingest
     depends_on: &langfuse-deps
       langfuse-postgres:
         condition: service_healthy

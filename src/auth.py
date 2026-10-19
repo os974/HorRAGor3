@@ -37,6 +37,7 @@ from loguru import logger
 from pydantic import BaseModel
 
 from src.config import settings
+from src.observability import tag_current_trace
 
 _ALGORITHM = "HS256"
 router = APIRouter(prefix="/auth", tags=["auth"])
@@ -220,6 +221,7 @@ async def login(req: LoginRequest) -> TokenPair:
         logger.warning("Tentative de connexion refusée pour {!r}", req.username)
         raise HTTPException(status_code=401, detail="identifiants invalides")
     logger.info("Connexion réussie : {}", req.username)
+    tag_current_trace(user_id=req.username)
     return _issue_pair(req.username)
 
 
@@ -248,6 +250,7 @@ async def refresh(req: RefreshRequest) -> TokenPair:
         logger.warning("Refresh déjà consommé ou inconnu pour {} : session révoquée", subject)
         raise _unauthorized("jeton révoqué")
     logger.info("Jetons renouvelés pour {}", subject)
+    tag_current_trace(user_id=subject)
     return _issue_pair(subject)
 
 

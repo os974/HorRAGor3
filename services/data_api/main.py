@@ -34,6 +34,7 @@ from src.contracts.schemas import FilmMetadata, FilmRef
 from src.data.db import get_engine
 from src.data.repository import SqlFilmRepository
 from src.logging_conf import setup_logging
+from src.observability import LangfuseRequestMiddleware, tag_current_trace
 
 # Un seul flux de logs Loguru, comme partout (règle : journalisation bout en bout).
 setup_logging()
@@ -62,6 +63,9 @@ app = FastAPI(title="HorRAGor3 — API Données", version="1.0.0")
 
 # /metrics dès la naissance du service (règle observabilité, cible Prometheus).
 Instrumentator().instrument(app).expose(app)
+
+# Une trace Langfuse par requête métier, rattachée au compte de l'appelant.
+app.add_middleware(LangfuseRequestMiddleware, service="api-donnees")
 
 RepoDep = Annotated[FilmRepository, Depends(get_repository)]
 # Le compte à l'origine de l'appel (jeton relayé par l'API IA ; 401 sinon).
@@ -118,6 +122,7 @@ async def film_metadata(film_id: int, repo: RepoDep, user: UserDep) -> FilmMetad
             « jamais planter »).
     """
     logger.info("GET /films/{} pour {}", film_id, user)
+    tag_current_trace(user_id=user)
     try:
         metadata = repo.get_metadata(film_id)
     except Exception:  # noqa: BLE001 — la panne de la base ne doit pas fuiter en 500 brut
@@ -150,6 +155,7 @@ async def similar_films(
         HTTPException: 401 sans jeton valide ; 503 si la base est injoignable.
     """
     logger.info("GET /films/{}/similar pour {}", film_id, user)
+    tag_current_trace(user_id=user)
     try:
         return repo.recommend_similar(film_id, k)
     except Exception:  # noqa: BLE001
