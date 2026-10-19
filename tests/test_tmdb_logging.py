@@ -81,3 +81,16 @@ def test_setup_logging_idempotent():
     """Deux appels ne dupliquent pas les sorties (remove avant add)."""
     setup_logging()
     setup_logging()  # ne doit pas lever ni empiler les sinks
+
+
+def test_intercept_handler_attribue_le_log_a_son_vrai_appelant():
+    """L'origine affichée est le module appelant, pas la mécanique de logging."""
+    setup_logging()
+    records: list[dict] = []
+    handler_id = logger.add(lambda message: records.append(message.record), level="WARNING")
+    try:
+        logging.getLogger("horragor.test-origine").warning("ping-origine")
+    finally:
+        logger.remove(handler_id)
+    record = next(r for r in records if r["message"] == "ping-origine")
+    assert record["function"] == "test_intercept_handler_attribue_le_log_a_son_vrai_appelant"

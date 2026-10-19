@@ -19,6 +19,7 @@ Loguru (``logger.contextualize``) ; ils figurent dans chaque ligne JSON
 (champ ``extra``) émise pendant la requête, graphe compris.
 """
 
+import inspect
 import logging
 import sys
 
@@ -44,10 +45,11 @@ class InterceptHandler(logging.Handler):
             level: str | int = logger.level(record.levelname).name
         except ValueError:
             level = record.levelno
-        # Remonte la pile jusqu'au vrai appelant pour que Loguru affiche le bon
-        # fichier/ligne (et pas ce handler).
-        frame, depth = logging.currentframe(), 2
-        while frame and frame.f_code.co_filename == logging.__file__:
+        # Remonte la pile au-delà de ce handler et du module logging, jusqu'au
+        # vrai appelant : Loguru affiche alors son fichier/sa ligne (recette
+        # officielle de Loguru).
+        frame, depth = inspect.currentframe(), 0
+        while frame and (depth == 0 or frame.f_code.co_filename == logging.__file__):
             frame = frame.f_back
             depth += 1
         logger.opt(depth=depth, exception=record.exc_info).log(level, record.getMessage())
