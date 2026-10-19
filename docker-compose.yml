@@ -168,6 +168,10 @@ services:
     command:
       - TCP-LISTEN:11434,bind=${DOCKER_GATEWAY_IP:-172.17.0.1},fork,reuseaddr
       - TCP:127.0.0.1:11434
+    healthcheck:
+      # Chemin complet vérifié : écoute sur la passerelle → relais → Ollama.
+      test: wget --quiet --tries=1 -O /dev/null http://${DOCKER_GATEWAY_IP:-172.17.0.1}:11434/api/version || exit 1
+      <<: *healthcheck
     restart: unless-stopped
 
   api-ia:
