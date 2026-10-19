@@ -15,3 +15,7 @@ data/faiss_index/
 data/db_init/
 logs/
 certs/
+
+# Documentation Sphinx (construite et générée)
+docs/sphinx/_build/
+docs/sphinx/_generated/

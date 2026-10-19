@@ -70,6 +70,16 @@ Monitoring 360° (interfaces sur la boucle locale uniquement) :
 Au premier lancement, créer les sondes Uptime Kuma :
 `uv run --with uptime-kuma-api==1.2.1 python scripts/setup_uptime_kuma.py`.
 
+## Documentation (Sphinx)
+
+```bash
+uv run --group docs sphinx-build -W -b html docs/sphinx docs/sphinx/_build/html
+```
+
+Doc automatique des deux API (endpoints générés depuis OpenAPI), schémas
+relationnels (MCD/MLD/MPD), cartographie du graphe générée depuis
+`src/graph/pipeline.py`, et le livre du projet (`docs/lifecycle.md`).
+
 ## Tests
 
 ```bash
