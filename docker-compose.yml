@@ -3,7 +3,7 @@
 #   navigateur ── https://horragor.localhost (127.0.0.1:443) ──> traefik ──> frontend
 #   frontend ── front_net (INTERNE) ── https://api.horragor.localhost ──> traefik ──> api-ia
 #   api-ia ── data_net (INTERNE, étanche) ──> api-donnees ── db_net (INTERNE) ──> db
-#   api-ia ── ia_net ──> Ollama (hôte, host-gateway) + web (Enquêteur)
+#   api-ia ── ia_net ──> web (Enquêteur) ; ── host-gateway ──> ollama-relay ──> Ollama (hôte)
 #   api-ia ── langfuse_ingest ──> langfuse-web (traces de l'agent)
 #
 # Monitoring 360° (brief) : Prometheus + Grafana + Uptime Kuma pour la
@@ -156,6 +156,20 @@ services:
         condition: service_healthy
     restart: unless-stopped
 
+  ollama-relay:
+    # Ollama tourne sur l'hôte (GPU, poids des modèles) et n'écoute que sur
+    # 127.0.0.1 : ce relais l'expose sur la SEULE passerelle Docker
+    # (host-gateway, 172.17.0.1 par défaut), jamais sur le réseau local, sans
+    # toucher à la configuration de l'hôte ni à localhost:11434.
+    <<: *hardening
+    image: alpine/socat:1.8.0.3
+    network_mode: host
+    user: "65534:65534"
+    command:
+      - TCP-LISTEN:11434,bind=${DOCKER_GATEWAY_IP:-172.17.0.1},fork,reuseaddr
+      - TCP:127.0.0.1:11434
+    restart: unless-stopped
+
   api-ia:
     <<: *hardening
     build:
@@ -276,6 +290,8 @@ services:
     volumes:
       - kuma_data:/app/data
       - ./certs/ca.pem:/certs/ca.pem:ro
+    extra_hosts:
+      - host.docker.internal:host-gateway # sonde du LLM via le relais Ollama
     # Une patte sur chaque réseau à sonder (sondes créées par
     # scripts/setup_uptime_kuma.py).
     networks:

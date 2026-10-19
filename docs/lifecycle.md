@@ -519,8 +519,8 @@ répond (front HTTPS 200, certificat vérifié contre la CA locale ; login → j
 ⚠️ **Anomalie découverte** (détaillée au chapitre 10) : `/chat` en cluster renvoie le repli gothique —
 Ollama, sur l'hôte, n'écoute que sur `127.0.0.1:11434` et refuse les connexions
 venues des conteneurs (`host.docker.internal` → *Connection refused*). Le
-cluster n'avait donc jamais servi un récit de bout en bout. Correctif en attente
-d'arbitrage (configuration d'Ollama côté hôte).
+cluster n'avait donc jamais servi un récit de bout en bout. Résolu au
+chapitre 16 (relais vers la seule passerelle Docker).
 
 ---
 
@@ -761,8 +761,7 @@ Chaque incident de ce livre devient un ticket, clos avec la référence de son
 correctif : quota Supabase (ch. 6), Traefik API 1.44 et 504 (ch. 8), port
 ClickHouse et méta-paquet `langchain` (ch. 4), Langfuse muet (ch. 11),
 Mermaid/Sphinx (ch. 12), revue de sécurité (ch. 10), CD sans garde-fou
-(ch. 13). Un seul reste **ouvert** : Ollama injoignable depuis le cluster
-(ch. 9), en attente d'un arbitrage sur la configuration de l'hôte.
+(ch. 13), Ollama injoignable depuis le cluster (ch. 9, résolu au ch. 16).
 
 ---
 
@@ -786,11 +785,50 @@ faux par l'avancement** — le risque propre à un livre tenu au fil de l'eau :
 - healthchecks factorisés (ancre `x-healthcheck`), script Kuma sans
   dépendance implicite (`--env-file` au lieu de `python-dotenv`).
 
-### Ce qui reste ouvert
-- **Ollama injoignable depuis le cluster** (chapitre 9) : le seul écart
-  fonctionnel — le récit de bout en bout en conteneurs en dépend. Arbitrage
-  sur la configuration de l'hôte en attente.
-- Les tickets GitHub Issues à créer (chapitre 14), les merges de la pile de
-  branches et l'activation de GitHub Pages (premier passage du CD).
+---
+
+## Chapitre 16 — Le relais Ollama : le premier récit en conteneurs
+
+Dernier écart fonctionnel (chapitre 9) : Ollama, service de l'hôte (GPU,
+modèles de plusieurs Go), n'écoute que sur `127.0.0.1:11434`. Les conteneurs
+l'appellent par `host.docker.internal`, c'est-à-dire la passerelle Docker
+(`172.17.0.1`) — connexion refusée.
+
+Trois voies écartées : écouter sur `0.0.0.0` (Ollama n'a pas
+d'authentification : tout le réseau local en profiterait) ; lier Ollama à la
+passerelle par un override systemd (casse `localhost:11434` pour les autres
+projets) ; un relais systemd sur l'hôte (configuration hors du repo, non
+reproductible).
+
+### `docker-compose.yml` — le service `ollama-relay`
+- **Entrées** : les appels LLM d'api-ia vers `host.docker.internal:11434`.
+- **Sorties** : les mêmes requêtes, relayées vers `127.0.0.1:11434`.
+- **Ce qui s'y passe** : un conteneur `alpine/socat` en `network_mode: host`
+  (il voit la boucle locale de l'hôte) écoute **uniquement** sur l'IP de la
+  passerelle Docker (`DOCKER_GATEWAY_IP`, `172.17.0.1` par défaut) — jamais
+  sur le réseau local — et relaie vers Ollama. Utilisateur `nobody`,
+  `cap_drop: ALL`, `no-new-privileges`. Ni sudo ni configuration de l'hôte :
+  tout reste dans le repo, et `localhost:11434` reste intact.
+- **Sonde dédiée** : la revue de sécurité l'avait noté, `/health` restait vert
+  alors que chaque récit tombait sur le repli. Uptime Kuma sonde désormais le
+  LLM par le même chemin qu'api-ia (« Intelligence — Ollama (via relais) »).
+
+**Vu en réel** (2026-10-19) : `ss` montre le relais sur `172.17.0.1:11434`
+seulement (Ollama reste sur `127.0.0.1`) ; à travers tout le cluster (Traefik
+TLS → JWT → api-ia → API Données → Postgres, + TMDB et web) :
+- « Parle-moi du film Hereditary » → parcours `rag → narration`, sources
+  `validate_film`, `get_metadata`, `get_credits`, 75 s (chargement du modèle
+  inclus) ;
+- « Raconte-moi des anecdotes de tournage sur Hereditary » → parcours
+  `rag → scraper → narration`, sources + `search_web`, `scrape`, 29 s ;
+- **Langfuse intégré** : une trace par session ; pour la seconde, 24
+  observations dont 6 générations LLM (6 698 tokens), l'arbre complet des
+  nœuds, des routeurs (`should_continue_rag`, `should_continue_scraper`) et
+  des outils (`lookup_movie`, `web_search`, `wikipedia_synopsis`) ;
+- Prometheus : `/chat` 2 × `2xx` ; **10 sondes Uptime Kuma UP**.
+
+### Ce qui reste
+Les tickets GitHub Issues à créer (chapitre 14), les merges de la pile de
+branches et l'activation de GitHub Pages (premier passage du CD).
 
 *Fin de la Phase G — l'épilogue MLOps du brief.*
