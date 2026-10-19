@@ -147,6 +147,8 @@ services:
     environment:
       # Rôle en LECTURE SEULE (SELECT, statement_timeout) ; mot de passe URL-safe.
       DATABASE_URL: postgresql+psycopg://${POSTGRES_RO_USER:-horragor_ro}:${POSTGRES_RO_PASSWORD}@db:5432/${POSTGRES_DB:-horragor}
+      # Même secret que l'API IA : vérifie le jeton de l'utilisateur qu'elle relaie.
+      JWT_SECRET: ${JWT_SECRET:?JWT_SECRET manquant dans .env}
       LOG_LEVEL: ${LOG_LEVEL:-INFO}
     networks:
       - data_net

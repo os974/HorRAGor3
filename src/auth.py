@@ -1,4 +1,4 @@
-"""Authentification JWT access/refresh : le verrou IHM ↔ API IA (brief, couche 2).
+"""Authentification JWT access/refresh : le verrou des échanges entre services.
 
 Mécanique classique à deux jetons :
     - **access token** (courte durée, ~15 min) : présenté en ``Authorization:
@@ -12,12 +12,21 @@ Un seul compte de démonstration (``APP_USERNAME``/``APP_PASSWORD`` du ``.env``)
 le brief exige le verrou des échanges, pas une gestion d'utilisateurs.
 Signature HS256 avec ``JWT_SECRET`` (secret, jamais commité).
 
+Toute la chaîne est liée au compte : l'IHM présente l'access token à l'API IA,
+qui le **relaie** à l'API Données pour chaque appel fait au nom de la requête
+(:func:`forwarding_access_token`) ; l'API Données le vérifie avec le même
+secret (:func:`require_access`). Aucun service ne parle à un autre sans le
+jeton de l'utilisateur.
+
 Le registre des refresh actifs vit en mémoire : l'API tourne en un seul
 processus (un redémarrage impose simplement de se reconnecter).
 """
 
 import hmac
 import uuid
+from collections.abc import Iterator
+from contextlib import contextmanager
+from contextvars import ContextVar
 from datetime import UTC, datetime, timedelta
 from typing import Annotated
 
@@ -34,6 +43,11 @@ router = APIRouter(prefix="/auth", tags=["auth"])
 
 # auto_error=False : on veut renvoyer NOS 401 explicites, pas le 403 par défaut.
 _bearer = HTTPBearer(auto_error=False)
+
+# Le jeton d'accès de la requête en cours, relayé aux appels inter-services
+# (même mécanisme que la trace : un ContextVar suit la requête jusque dans le
+# thread du graphe et ses outils).
+_forwarded_token: ContextVar[str | None] = ContextVar("forwarded_access_token", default=None)
 
 # Sujet → jti du SEUL refresh token actuellement valide.
 _active_refresh: dict[str, str] = {}
@@ -87,15 +101,28 @@ def _unauthorized(detail: str) -> HTTPException:
     return HTTPException(status_code=401, detail=detail, headers={"WWW-Authenticate": "Bearer"})
 
 
+def _require_secret() -> None:
+    """Vérifie que le secret de signature est configuré (seul besoin pour valider).
+
+    Raises:
+        HTTPException: 503 si ``JWT_SECRET`` manque — jamais de 500 sur une clé
+            de signature vide.
+    """
+    if not settings.jwt_secret:
+        logger.error("Auth non configurée : JWT_SECRET manquant")
+        raise HTTPException(status_code=503, detail="authentification non configurée")
+
+
 def _require_configured() -> None:
-    """Vérifie que l'auth est configurée (secret + compte démo).
+    """Vérifie que l'émission de jetons est possible (secret + compte démo).
 
     Raises:
         HTTPException: 503 si ``JWT_SECRET``/``APP_USERNAME``/``APP_PASSWORD``
-            manquent — jamais de 500 sur une clé de signature vide.
+            manquent.
     """
-    if not (settings.jwt_secret and settings.app_username and settings.app_password):
-        logger.error("Auth non configurée : JWT_SECRET/APP_USERNAME/APP_PASSWORD manquants")
+    _require_secret()
+    if not (settings.app_username and settings.app_password):
+        logger.error("Auth non configurée : APP_USERNAME/APP_PASSWORD manquants")
         raise HTTPException(status_code=503, detail="authentification non configurée")
 
 
@@ -135,7 +162,7 @@ def _decode_token(token: str, expected_type: str) -> dict:
         HTTPException: 503 si l'auth n'est pas configurée ; 401 si le jeton
             est invalide, expiré, incomplet ou du mauvais type.
     """
-    _require_configured()
+    _require_secret()
     required = ["exp", "sub", "type"] + (["jti"] if expected_type == "refresh" else [])
     try:
         payload = jwt.decode(
@@ -241,3 +268,45 @@ async def require_access(
     if credentials is None:
         raise _unauthorized("jeton d'accès requis")
     return _decode_token(credentials.credentials, expected_type="access")["sub"]
+
+
+async def bearer_token(
+    credentials: Annotated[HTTPAuthorizationCredentials | None, Depends(_bearer)],
+) -> str:
+    """Dépendance FastAPI : le jeton brut présenté (à relayer aux autres services).
+
+    À combiner avec :func:`require_access`, qui l'a déjà validé.
+
+    Args:
+        credentials: L'en-tête ``Authorization: Bearer ...`` (ou None).
+
+    Returns:
+        Le JWT tel que reçu, ou une chaîne vide s'il est absent.
+    """
+    return credentials.credentials if credentials else ""
+
+
+@contextmanager
+def forwarding_access_token(token: str) -> Iterator[None]:
+    """Relaie le jeton d'accès de la requête aux appels inter-services.
+
+    Args:
+        token: Le jeton d'accès validé de la requête en cours.
+
+    Yields:
+        La main, le jeton étant disponible via :func:`forwarded_access_token`.
+    """
+    reset = _forwarded_token.set(token)
+    try:
+        yield
+    finally:
+        _forwarded_token.reset(reset)
+
+
+def forwarded_access_token() -> str | None:
+    """Le jeton d'accès à relayer pour la requête en cours.
+
+    Returns:
+        Le jeton, ou None hors d'une requête authentifiée.
+    """
+    return _forwarded_token.get()

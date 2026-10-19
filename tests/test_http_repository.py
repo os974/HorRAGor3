@@ -3,6 +3,7 @@
 import httpx
 import pytest
 
+from src import auth
 from src.config import settings
 from src.data import http_repository
 from src.data.http_repository import HttpFilmRepository
@@ -73,3 +74,22 @@ def test_rag_tool_choisit_le_repo_selon_la_config(monkeypatch):
     """data_api_url définie → client HTTP ; vide → accès SQL direct."""
     monkeypatch.setattr(settings, "data_api_url", "http://api-donnees:8100")
     assert isinstance(rag_tool.get_repository(), HttpFilmRepository)
+
+
+def test_le_jeton_de_l_utilisateur_est_relaye(monkeypatch):
+    """Pendant une requête authentifiée, chaque appel porte le jeton du compte."""
+    seen: list[dict] = []
+
+    def fake_get(url, headers=None, **kwargs):
+        seen.append(headers or {})
+        return FakeResponse(200, {"id": 41, "title": "Hereditary"})
+
+    monkeypatch.setattr(http_repository.httpx, "get", fake_get)
+    repo = HttpFilmRepository(base_url="http://api-donnees:8100")
+
+    repo.get_metadata(41)  # hors requête : aucun jeton à relayer
+    with auth.forwarding_access_token("jeton-olivier"):
+        repo.get_metadata(41)
+    repo.get_metadata(41)  # le relais s'arrête avec la requête
+
+    assert seen == [{}, {"Authorization": "Bearer jeton-olivier"}, {}]

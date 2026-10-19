@@ -5,6 +5,7 @@ from fastapi.testclient import TestClient
 from loguru import logger
 
 import src.main as main
+from src import auth
 from src.auth import require_access
 from src.contracts.schemas import ChatRequest, ChatResponse
 from src.engine import get_engine
@@ -71,6 +72,25 @@ def test_chat_pose_les_ids_de_correlation_dans_les_logs(client):
     assert chat_logs
     assert chat_logs[0]["extra"]["session_id"] == "conv-42"
     assert len(chat_logs[0]["extra"]["request_id"]) == 8
+
+
+def test_chat_relaie_le_jeton_pendant_le_run(client, monkeypatch):
+    """Le jeton présenté à /chat est disponible pour les appels à l'API Données."""
+    seen: list[str | None] = []
+
+    class SpyEngine(FakeEngine):
+        async def run(self, req: ChatRequest, user: str = "anonyme") -> ChatResponse:
+            seen.append(auth.forwarded_access_token())
+            return await super().run(req, user)
+
+    main.app.dependency_overrides[get_engine] = lambda: SpyEngine()
+    client.post(
+        "/chat",
+        json={"message": "Alien ?", "session_id": "t"},
+        headers={"Authorization": "Bearer jeton-olivier"},
+    )
+    assert seen == ["jeton-olivier"]
+    assert auth.forwarded_access_token() is None  # rien ne fuit hors de la requête
 
 
 def test_chat_valide_la_requete(client):

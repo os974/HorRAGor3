@@ -24,7 +24,7 @@ from fastapi import Depends, FastAPI
 from loguru import logger
 from prometheus_fastapi_instrumentator import Instrumentator
 
-from src.auth import require_access
+from src.auth import bearer_token, forwarding_access_token, require_access
 from src.auth import router as auth_router
 from src.config import settings
 from src.contracts.interfaces import AgentEngine
@@ -74,6 +74,8 @@ app.include_router(auth_router)
 EngineDep = Annotated[AgentEngine, Depends(get_engine)]
 # L'identité vérifiée par le jeton d'accès (401 sinon) : verrouille les routes métier.
 UserDep = Annotated[str, Depends(require_access)]
+# Le jeton lui-même, relayé à l'API Données : toute la chaîne reste liée au compte.
+TokenDep = Annotated[str, Depends(bearer_token)]
 
 
 @app.get("/health")
@@ -87,7 +89,7 @@ async def health() -> dict[str, str]:
 
 
 @app.post("/chat", response_model=ChatResponse)
-async def chat(req: ChatRequest, engine: EngineDep, user: UserDep) -> ChatResponse:
+async def chat(req: ChatRequest, engine: EngineDep, user: UserDep, token: TokenDep) -> ChatResponse:
     """Délègue la question au moteur multi-agent (route verrouillée par JWT).
 
     Corrélation : ``session_id`` (la conversation, fourni par le Front) et un
@@ -98,10 +100,14 @@ async def chat(req: ChatRequest, engine: EngineDep, user: UserDep) -> ChatRespon
         req: Message utilisateur et identifiant de session.
         engine: Le moteur injecté (GraphEngine, ou fake dans les tests).
         user: L'identité extraite du jeton d'accès (401 si absent/invalide).
+        token: Le jeton d'accès, relayé aux appels vers l'API Données.
 
     Returns:
         La réponse complète (récit gothique, parcours, sources, trace).
     """
-    with logger.contextualize(session_id=req.session_id, request_id=uuid4().hex[:8]):
+    with (
+        logger.contextualize(session_id=req.session_id, request_id=uuid4().hex[:8]),
+        forwarding_access_token(token),
+    ):
         logger.info("POST /chat [{}] par {} : {!r}", req.session_id, user, req.message[:80])
         return await engine.run(req, user)
