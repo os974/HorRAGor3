@@ -26,10 +26,10 @@ class Settings(BaseSettings):
     """Réglages typés de l'application, chargés depuis ``.env``.
 
     Attributes:
-        database_url: Connection string PostgreSQL Supabase (secret, accès principal
-            à la base relationnelle de HorRAGor1 via SQLAlchemy).
-        supabase_url: URL API REST Supabase (secret, optionnel).
-        supabase_key: Clé API Supabase (secret, optionnel).
+        database_url: Connection string SQLAlchemy de la base (secret). En
+            cluster : fournie par le compose à l'API Données seule (conteneur
+            ``db``, rôle en lecture seule). Dans le ``.env`` : la base source
+            (Supabase) — lue par le dump et par l'accès direct en dev.
         tmdb_token: Token TMDB v4 pour enrichir réalisateur/casting (secret,
             optionnel — si vide, l'enrichissement est ignoré sans erreur).
         tmdb_base_url: Base de l'API TMDB.
@@ -68,10 +68,8 @@ class Settings(BaseSettings):
     # extra="ignore" : on tolère des variables .env non listées ici sans planter.
     model_config = SettingsConfigDict(env_file=_PROJECT_ROOT / ".env", extra="ignore")
 
-    # --- Supabase : SECRETS (confinés au backend) ---
+    # --- Base relationnelle : SECRET (confiné à la couche Données en cluster) ---
     database_url: str = ""
-    supabase_url: str = ""
-    supabase_key: str = ""
 
     # --- TMDB : enrichissement réalisateur/casting ---
     tmdb_token: str = ""

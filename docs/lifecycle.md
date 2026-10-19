@@ -431,6 +431,8 @@ navigateur ── https://horragor.localhost ──> traefik (443, SEUL port pub
    └──> api-ia (JWT) ──data_net (internal, étanche)──> api-donnees ──> Supabase
               └──host-gateway──> Ollama (hôte) · Langfuse (hôte:3000) · web
 ```
+*(État à ce chapitre : la base rejoint le cluster au chapitre 9, Langfuse au
+chapitre 11, et la topologie est durcie au chapitre 10.)*
 
 ### `scripts/gen_certs.sh` + `traefik/`
 - **Entrées** : openssl (une fois).
@@ -451,7 +453,7 @@ navigateur ── https://horragor.localhost ──> traefik (443, SEUL port pub
   (supprimée au chapitre 9, quand la base rejoint le cluster) ;
   **ségrégation des secrets** : `DATABASE_URL` n'est fourni qu'à api-donnees,
   api-ia ne reçoit que `DATA_API_URL` ; Ollama et Langfuse restent sur l'hôte
-  (`host-gateway`) ; l'index FAISS est monté en volume RO (jamais dans
+  (`host-gateway` ; Langfuse est intégré au chapitre 11) ; l'index FAISS est monté en volume RO (jamais dans
   l'image) ; Traefik résout `api.horragor.localhost` en interne (alias
   réseau) et route le navigateur vers le front. Chaque Dockerfile embarque
   un `HEALTHCHECK` (sondes Docker + Uptime Kuma).
@@ -638,7 +640,7 @@ UIs : 127.0.0.1 → Langfuse :3000 · Kuma :3001 · Grafana :3002 · Prometheus 
 
 ### `scripts/setup_uptime_kuma.py` — les sondes, as code aussi
 - Uptime Kuma n'a pas de provisioning par fichier : le script (idempotent,
-  `uv run --with uptime-kuma-api`) crée le compte admin puis 9 sondes — les
+  `uv run --env-file .env --with uptime-kuma-api`) crée le compte admin puis 9 sondes — les
   deux **entrées publiques en TLS vérifié** (Kuma fait confiance à la CA
   locale via `NODE_EXTRA_CA_CERTS`), Streamlit, API IA, API Données, la
   **chaîne API → Postgres** (sonde à mot-clé : `/films/41` doit contenir
@@ -762,4 +764,33 @@ Mermaid/Sphinx (ch. 12), revue de sécurité (ch. 10), CD sans garde-fou
 (ch. 13). Un seul reste **ouvert** : Ollama injoignable depuis le cluster
 (ch. 9), en attente d'un arbitrage sur la configuration de l'hôte.
 
-*Chapitre suivant : la clôture de la Phase G.*
+---
+
+## Chapitre 15 — La clôture de la Phase G
+
+Trois revues ont encadré l'épilogue, chacune appliquée avant de pousser :
+sécurité (chapitre 10), qualité des tests et du pipeline (chapitre 13), et
+une revue qualité finale. Cette dernière a surtout relevé des **textes rendus
+faux par l'avancement** — le risque propre à un livre tenu au fil de l'eau :
+- « l'unique port publié » : vrai pour l'application (`127.0.0.1:443`), mais
+  les UIs d'observabilité publient aussi sur la boucle locale — reformulé ;
+- README : installation de Langfuse par clone externe, `--cov=src`,
+  « 83 tests », CI « sur push » — remis à jour ;
+- `SUPABASE_URL`/`SUPABASE_KEY` : configuration morte (lue nulle part),
+  supprimée ; Supabase n'est plus présenté comme « la » base mais comme la
+  source du dump et l'accès direct en dev ;
+- Uptime Kuma tournait hors de l'ancre de durcissement : il la rejoint, avec
+  les trois seules capacités dont son entrypoint a besoin (`CHOWN`, `SETUID`,
+  `SETGID` pour basculer sur l'uid 1001). Les six conteneurs Langfuse gardent
+  la configuration officielle de l'éditeur, sur leur réseau interne ;
+- healthchecks factorisés (ancre `x-healthcheck`), script Kuma sans
+  dépendance implicite (`--env-file` au lieu de `python-dotenv`).
+
+### Ce qui reste ouvert
+- **Ollama injoignable depuis le cluster** (chapitre 9) : le seul écart
+  fonctionnel — le récit de bout en bout en conteneurs en dépend. Arbitrage
+  sur la configuration de l'hôte en attente.
+- Les tickets GitHub Issues à créer (chapitre 14), les merges de la pile de
+  branches et l'activation de GitHub Pages (premier passage du CD).
+
+*Fin de la Phase G — l'épilogue MLOps du brief.*
