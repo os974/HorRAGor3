@@ -6,6 +6,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 import src.main as main
+from src import auth
 from src.auth import _create_token
 from src.config import settings
 from src.contracts.schemas import ChatRequest, ChatResponse
@@ -26,6 +27,7 @@ def client(monkeypatch):
     monkeypatch.setattr(settings, "app_username", "demo")
     monkeypatch.setattr(settings, "app_password", "abracadabra")
     monkeypatch.setattr(main.TitleIndex, "exists", classmethod(lambda cls, d=None: False))
+    auth._active_refresh.clear()  # registre des refresh actifs : état global, remis à zéro
     main.app.dependency_overrides[get_engine] = lambda: FakeEngine()
     with TestClient(main.app) as test_client:
         yield test_client

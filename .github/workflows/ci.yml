@@ -1,13 +1,15 @@
-# CI HorRAGor3 : lint + format + tests avec couverture minimale 80 %
-# (exigence de l'épilogue MLOps du brief). Les tests sont hermétiques :
-# aucun besoin d'Ollama, de Supabase, de l'index FAISS ni du réseau.
+# CI HorRAGor3 : lint + format + shellcheck + tests avec couverture ≥ 80 %
+# (exigence de l'épilogue MLOps du brief : « les deux API et l'UI »).
+# Les tests sont hermétiques : aucun besoin d'Ollama, de la base, de l'index
+# FAISS ni du réseau.
+#
+# Déclenchée sur chaque PR, et appelée par cd.yml (workflow_call) sur main :
+# la livraison n'a lieu que si ce garde-fou est vert.
 name: CI
 
 on:
   pull_request:
-    branches: [main]
-  push:
-    branches: [main]
+  workflow_call:
 
 jobs:
   quality:
@@ -30,7 +32,18 @@ jobs:
       - name: Format (ruff)
         run: uv run ruff format --check .
 
+      - name: Scripts shell (shellcheck)
+        run: shellcheck scripts/*.sh docker/db-init/*.sh
+
       # `--cov` sans argument : le périmètre vient de [tool.coverage.run] du
       # pyproject (les deux API + l'UI, comme l'exige le brief).
-      - name: Tests + couverture ≥ 80 % (pytest)
+      - name: Tests + couverture globale ≥ 80 % (pytest)
         run: uv run pytest --cov -q
+
+      # Le seuil global pourrait masquer un périmètre faible : chacun est
+      # aussi vérifié isolément.
+      - name: Couverture ≥ 80 % par périmètre (API IA, API Données, UI)
+        run: |
+          uv run coverage report --include="src/*" --fail-under=80 > /dev/null
+          uv run coverage report --include="services/*" --fail-under=80 > /dev/null
+          uv run coverage report --include="app_frontend.py" --fail-under=80 > /dev/null
