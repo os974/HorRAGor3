@@ -3,7 +3,13 @@
 #   navigateur ── https://horragor.localhost (127.0.0.1:443) ──> traefik ──> frontend
 #   frontend ── front_net (INTERNE) ── https://api.horragor.localhost ──> traefik ──> api-ia
 #   api-ia ── data_net (INTERNE, étanche) ──> api-donnees ── db_net (INTERNE) ──> db
-#   api-ia ── ia_net ──> Ollama (hôte, host-gateway) + Langfuse (hôte:3000) + web (Enquêteur)
+#   api-ia ── ia_net ──> Ollama (hôte, host-gateway) + web (Enquêteur)
+#   api-ia ── langfuse_ingest ──> langfuse-web (traces de l'agent)
+#
+# Monitoring 360° (brief) : Prometheus + Grafana + Uptime Kuma pour la
+# télémétrie des 3 composants, Langfuse pour l'agent (monitoring/langfuse/).
+# Interfaces d'administration sur la boucle locale uniquement :
+#   Langfuse 127.0.0.1:3000 · Uptime Kuma :3001 · Grafana :3002 · Prometheus :9090
 #
 # Le front n'a AUCUN chemin réseau vers api-ia hors de Traefik : le chiffrement
 # UI → API IA est imposé par la topologie, pas par convention.
@@ -11,7 +17,12 @@
 # qu'un rôle en lecture seule ; api-ia ne connaît que DATA_API_URL.
 #
 # Prérequis : ./scripts/gen_certs.sh et ./scripts/dump_supabase.sh (une fois),
-# Ollama et Langfuse sur l'hôte. Les ${VAR} viennent du .env.
+# Ollama sur l'hôte. Les ${VAR} viennent du .env.
+
+include:
+  - path: monitoring/langfuse/compose.yml
+    project_directory: .
+    env_file: .env
 
 x-hardening: &hardening
   security_opt:
@@ -31,9 +42,14 @@ networks:
   # La base n'est joignable QUE par l'API Données.
   db_net:
     internal: true
+  # Les outils d'observabilité entre eux (et la publication de leurs UIs).
+  obs_net:
 
 volumes:
   db_data:
+  prometheus_data:
+  grafana_data:
+  kuma_data:
 
 services:
   traefik:
@@ -46,6 +62,10 @@ services:
       - --entrypoints.internal.address=:8082
       - --ping=true
       - --ping.entrypoint=internal
+      # Métriques par service (front, api) : la télémétrie de la couche
+      # Présentation, lue par Prometheus sur le réseau privé.
+      - --metrics.prometheus=true
+      - --metrics.prometheus.entrypoint=internal
       - --log.level=INFO
     # Lire la clé du certificat (mode 600, propriétaire hôte) malgré cap_drop.
     cap_add:
@@ -69,9 +89,11 @@ services:
       retries: 3
     networks:
       front_net:
-        # Le frontend résout api.horragor.localhost → Traefik (seul chemin vers l'IA).
+        # Le frontend résout api.horragor.localhost → Traefik (seul chemin vers
+        # l'IA) ; Uptime Kuma sonde aussi l'entrée publique par ces noms.
         aliases:
           - api.horragor.localhost
+          - horragor.localhost
       ia_net:
     restart: unless-stopped
 
@@ -135,7 +157,7 @@ services:
     environment:
       DATA_API_URL: http://api-donnees:8100 # jamais d'identifiants de base ici
       OLLAMA_BASE_URL: http://host.docker.internal:11434
-      LANGFUSE_HOST: http://host.docker.internal:3000
+      LANGFUSE_HOST: http://langfuse-web:3000
       LANGFUSE_PUBLIC_KEY: ${LANGFUSE_PUBLIC_KEY:-}
       LANGFUSE_SECRET_KEY: ${LANGFUSE_SECRET_KEY:-}
       JWT_SECRET: ${JWT_SECRET:?JWT_SECRET manquant dans .env}
@@ -146,10 +168,11 @@ services:
     volumes:
       - ./data/faiss_index:/app/data/faiss_index:ro # l'index, jamais dans l'image
     extra_hosts:
-      - host.docker.internal:host-gateway # Ollama + Langfuse restent sur l'hôte
+      - host.docker.internal:host-gateway # Ollama reste sur l'hôte (GPU, modèles)
     networks:
       - ia_net
       - data_net
+      - langfuse_ingest
     depends_on:
       api-donnees:
         condition: service_healthy
@@ -172,4 +195,82 @@ services:
     depends_on:
       api-ia:
         condition: service_healthy
+    restart: unless-stopped
+
+  # ===================== Observabilité (télémétrie des 3 couches) =====================
+
+  prometheus:
+    <<: *hardening
+    image: prom/prometheus:v3.5.0
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.path=/prometheus
+      - --storage.tsdb.retention.time=15d
+    ports:
+      - "127.0.0.1:9090:9090"
+    volumes:
+      - ./monitoring/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus_data:/prometheus
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost:9090/-/healthy"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+    # ia_net : api-ia + Traefik ; data_net : api-donnees ; obs_net : Grafana.
+    networks:
+      - obs_net
+      - ia_net
+      - data_net
+    restart: unless-stopped
+
+  grafana:
+    <<: *hardening
+    image: grafana/grafana:12.1.0
+    environment:
+      GF_SECURITY_ADMIN_USER: admin
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:?GRAFANA_ADMIN_PASSWORD manquant dans .env}
+      GF_USERS_ALLOW_SIGN_UP: "false"
+      # Souveraineté : aucune donnée d'usage envoyée à l'éditeur.
+      GF_ANALYTICS_REPORTING_ENABLED: "false"
+      GF_ANALYTICS_CHECK_FOR_UPDATES: "false"
+      GF_ANALYTICS_CHECK_FOR_PLUGIN_UPDATES: "false"
+    ports:
+      - "127.0.0.1:3002:3000"
+    volumes:
+      # Datasource + dashboards provisionnés as code (versionnés dans le repo).
+      - ./monitoring/grafana/provisioning:/etc/grafana/provisioning:ro
+      - grafana_data:/var/lib/grafana
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost:3000/api/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+    networks:
+      - obs_net
+    depends_on:
+      prometheus:
+        condition: service_healthy
+    restart: unless-stopped
+
+  uptime-kuma:
+    image: louislam/uptime-kuma:1.23.16
+    security_opt:
+      - no-new-privileges:true
+    environment:
+      # Fait confiance à la CA locale : les sondes TLS de l'entrée publique
+      # vérifient le certificat, comme le front.
+      NODE_EXTRA_CA_CERTS: /certs/ca.pem
+    ports:
+      - "127.0.0.1:3001:3001"
+    volumes:
+      - kuma_data:/app/data
+      - ./certs/ca.pem:/certs/ca.pem:ro
+    # Une patte sur chaque réseau à sonder (sondes créées par
+    # scripts/setup_uptime_kuma.py).
+    networks:
+      - obs_net
+      - front_net
+      - ia_net
+      - data_net
+      - langfuse_ingest
     restart: unless-stopped

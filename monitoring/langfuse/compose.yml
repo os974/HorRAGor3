@@ -1,0 +1,169 @@
+# Langfuse v3 self-hosted, intégré à la stack du projet (brief : « une stack
+# Docker unifiant Prometheus, Grafana, Uptime Kuma et Langfuse »). Inclus par
+# le docker-compose.yml racine (include:).
+#
+# Adapté du compose officiel Langfuse v3 : versions épinglées, secrets venus du
+# .env, AUCUN port publié hors de l'UI (127.0.0.1:3000), télémétrie coupée et
+# initialisation headless (LANGFUSE_INIT_*) — l'organisation, le projet, ses
+# clés et le compte admin sont provisionnés as code, sans clic dans l'UI.
+
+x-langfuse-env: &langfuse-env
+  DATABASE_URL: postgresql://langfuse:${LANGFUSE_DB_PASSWORD:?LANGFUSE_DB_PASSWORD manquant}@langfuse-postgres:5432/langfuse
+  SALT: ${LANGFUSE_SALT:?LANGFUSE_SALT manquant}
+  ENCRYPTION_KEY: ${LANGFUSE_ENCRYPTION_KEY:?LANGFUSE_ENCRYPTION_KEY manquant}
+  TELEMETRY_ENABLED: "false"
+  CLICKHOUSE_MIGRATION_URL: clickhouse://langfuse-clickhouse:9000
+  CLICKHOUSE_URL: http://langfuse-clickhouse:8123
+  CLICKHOUSE_USER: clickhouse
+  CLICKHOUSE_PASSWORD: ${LANGFUSE_CLICKHOUSE_PASSWORD:?LANGFUSE_CLICKHOUSE_PASSWORD manquant}
+  CLICKHOUSE_CLUSTER_ENABLED: "false"
+  LANGFUSE_S3_EVENT_UPLOAD_BUCKET: langfuse
+  LANGFUSE_S3_EVENT_UPLOAD_REGION: auto
+  LANGFUSE_S3_EVENT_UPLOAD_ACCESS_KEY_ID: minio
+  LANGFUSE_S3_EVENT_UPLOAD_SECRET_ACCESS_KEY: ${LANGFUSE_MINIO_PASSWORD:?LANGFUSE_MINIO_PASSWORD manquant}
+  LANGFUSE_S3_EVENT_UPLOAD_ENDPOINT: http://langfuse-minio:9000
+  LANGFUSE_S3_EVENT_UPLOAD_FORCE_PATH_STYLE: "true"
+  LANGFUSE_S3_EVENT_UPLOAD_PREFIX: events/
+  LANGFUSE_S3_MEDIA_UPLOAD_BUCKET: langfuse
+  LANGFUSE_S3_MEDIA_UPLOAD_REGION: auto
+  LANGFUSE_S3_MEDIA_UPLOAD_ACCESS_KEY_ID: minio
+  LANGFUSE_S3_MEDIA_UPLOAD_SECRET_ACCESS_KEY: ${LANGFUSE_MINIO_PASSWORD}
+  LANGFUSE_S3_MEDIA_UPLOAD_ENDPOINT: http://langfuse-minio:9000
+  LANGFUSE_S3_MEDIA_UPLOAD_FORCE_PATH_STYLE: "true"
+  LANGFUSE_S3_MEDIA_UPLOAD_PREFIX: media/
+  REDIS_HOST: langfuse-redis
+  REDIS_PORT: "6379"
+  REDIS_AUTH: ${LANGFUSE_REDIS_AUTH:?LANGFUSE_REDIS_AUTH manquant}
+
+networks:
+  # Les entrailles de Langfuse : aucune sortie, aucun port.
+  langfuse_net:
+    internal: true
+  # La porte de l'UI et de l'ingestion : api-ia y envoie ses traces,
+  # Uptime Kuma y sonde la santé, l'UI y est publiée sur 127.0.0.1:3000.
+  langfuse_ingest:
+
+volumes:
+  langfuse_postgres_data:
+  langfuse_clickhouse_data:
+  langfuse_clickhouse_logs:
+  langfuse_minio_data:
+  langfuse_redis_data:
+
+services:
+  langfuse-web:
+    image: langfuse/langfuse:3.210.0
+    environment:
+      <<: *langfuse-env
+      # Next.js écoute sur $HOSTNAME (l'id du conteneur par défaut, donc une
+      # seule de ses deux pattes réseau) : on force toutes les interfaces.
+      HOSTNAME: 0.0.0.0
+      NEXTAUTH_URL: http://localhost:3000
+      NEXTAUTH_SECRET: ${LANGFUSE_NEXTAUTH_SECRET:?LANGFUSE_NEXTAUTH_SECRET manquant}
+      LANGFUSE_INIT_ORG_ID: horragor
+      LANGFUSE_INIT_ORG_NAME: HorRAGor
+      LANGFUSE_INIT_PROJECT_ID: horragor3
+      LANGFUSE_INIT_PROJECT_NAME: HorRAGor3
+      LANGFUSE_INIT_PROJECT_PUBLIC_KEY: ${LANGFUSE_PUBLIC_KEY:?LANGFUSE_PUBLIC_KEY manquant}
+      LANGFUSE_INIT_PROJECT_SECRET_KEY: ${LANGFUSE_SECRET_KEY:?LANGFUSE_SECRET_KEY manquant}
+      LANGFUSE_INIT_USER_EMAIL: ${LANGFUSE_INIT_USER_EMAIL:?LANGFUSE_INIT_USER_EMAIL manquant}
+      LANGFUSE_INIT_USER_NAME: Olivier
+      LANGFUSE_INIT_USER_PASSWORD: ${LANGFUSE_INIT_USER_PASSWORD:?LANGFUSE_INIT_USER_PASSWORD manquant}
+    ports:
+      - "127.0.0.1:3000:3000"
+    networks:
+      - langfuse_net
+      - langfuse_ingest
+    depends_on: &langfuse-deps
+      langfuse-postgres:
+        condition: service_healthy
+      langfuse-clickhouse:
+        condition: service_healthy
+      langfuse-redis:
+        condition: service_healthy
+      langfuse-minio:
+        condition: service_healthy
+    restart: unless-stopped
+
+  langfuse-worker:
+    image: langfuse/langfuse-worker:3.210.0
+    environment:
+      <<: *langfuse-env
+    networks:
+      - langfuse_net
+    depends_on: *langfuse-deps
+    restart: unless-stopped
+
+  langfuse-postgres:
+    image: postgres:17
+    environment:
+      POSTGRES_USER: langfuse
+      POSTGRES_PASSWORD: ${LANGFUSE_DB_PASSWORD}
+      POSTGRES_DB: langfuse
+      TZ: UTC
+      PGTZ: UTC
+    volumes:
+      - langfuse_postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U langfuse -d langfuse"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    networks:
+      - langfuse_net
+    restart: unless-stopped
+
+  langfuse-clickhouse:
+    image: clickhouse/clickhouse-server:26.6
+    user: "101:101"
+    environment:
+      CLICKHOUSE_DB: default
+      CLICKHOUSE_USER: clickhouse
+      CLICKHOUSE_PASSWORD: ${LANGFUSE_CLICKHOUSE_PASSWORD}
+      TZ: UTC
+    volumes:
+      - langfuse_clickhouse_data:/var/lib/clickhouse
+      - langfuse_clickhouse_logs:/var/log/clickhouse-server
+    healthcheck:
+      test: wget --no-verbose --tries=1 --spider http://localhost:8123/ping || exit 1
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 5s
+    networks:
+      - langfuse_net
+    restart: unless-stopped
+
+  langfuse-minio:
+    image: cgr.dev/chainguard/minio:latest
+    entrypoint: sh
+    # Crée le bucket au démarrage, puis sert le stockage objet (événements bruts).
+    command: -c 'mkdir -p /data/langfuse && minio server --address ":9000" --console-address ":9001" /data'
+    environment:
+      MINIO_ROOT_USER: minio
+      MINIO_ROOT_PASSWORD: ${LANGFUSE_MINIO_PASSWORD}
+    volumes:
+      - langfuse_minio_data:/data
+    healthcheck:
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 1s
+      timeout: 5s
+      retries: 5
+      start_period: 1s
+    networks:
+      - langfuse_net
+    restart: unless-stopped
+
+  langfuse-redis:
+    image: redis:7.4
+    command: --requirepass ${LANGFUSE_REDIS_AUTH} --maxmemory-policy noeviction
+    volumes:
+      - langfuse_redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "-a", "${LANGFUSE_REDIS_AUTH}", "ping"]
+      interval: 3s
+      timeout: 10s
+      retries: 10
+    networks:
+      - langfuse_net
+    restart: unless-stopped

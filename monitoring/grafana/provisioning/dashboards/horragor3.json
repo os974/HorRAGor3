@@ -1,0 +1,148 @@
+{
+  "uid": "horragor3-couches",
+  "title": "HorRAGor3 — les 3 couches",
+  "description": "Télémétrie temps réel des couches Données, Intelligence et Présentation (épilogue MLOps du brief). L'agent LangGraph est suivi dans Langfuse.",
+  "tags": ["horragor3", "mlops"],
+  "timezone": "browser",
+  "schemaVersion": 39,
+  "version": 1,
+  "editable": false,
+  "refresh": "10s",
+  "time": { "from": "now-30m", "to": "now" },
+  "panels": [
+    {
+      "id": 1,
+      "type": "stat",
+      "title": "Disponibilité des cibles",
+      "gridPos": { "x": 0, "y": 0, "w": 24, "h": 4 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "up{job=~\"api-ia|api-donnees|traefik\"}",
+          "legendFormat": "{{job}} ({{couche}})",
+          "instant": true
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "mappings": [
+            { "type": "value", "options": { "0": { "text": "DOWN", "color": "red" }, "1": { "text": "UP", "color": "green" } } }
+          ],
+          "color": { "mode": "thresholds" },
+          "thresholds": { "mode": "absolute", "steps": [ { "color": "red", "value": null }, { "color": "green", "value": 1 } ] }
+        }
+      },
+      "options": { "colorMode": "background", "graphMode": "none", "textMode": "value_and_name", "reduceOptions": { "calcs": ["lastNotNull"] } }
+    },
+    {
+      "id": 2,
+      "type": "timeseries",
+      "title": "Débit par couche (requêtes/s)",
+      "gridPos": { "x": 0, "y": 4, "w": 12, "h": 8 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (job) (rate(http_requests_total{job=~\"api-ia|api-donnees\", handler!=\"/metrics\"}[1m]))",
+          "legendFormat": "{{job}}"
+        },
+        {
+          "refId": "B",
+          "expr": "sum(rate(traefik_service_requests_total{service=\"front@file\"}[1m]))",
+          "legendFormat": "frontend (via Traefik)"
+        }
+      ],
+      "fieldConfig": { "defaults": { "unit": "reqps" } }
+    },
+    {
+      "id": 3,
+      "type": "timeseries",
+      "title": "Latence p95 par couche",
+      "gridPos": { "x": 12, "y": 4, "w": 12, "h": 8 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "histogram_quantile(0.95, sum by (le, job) (rate(http_request_duration_seconds_bucket{job=~\"api-ia|api-donnees\", handler!=\"/metrics\"}[5m])))",
+          "legendFormat": "{{job}}"
+        },
+        {
+          "refId": "B",
+          "expr": "histogram_quantile(0.95, sum by (le) (rate(traefik_service_request_duration_seconds_bucket{service=\"front@file\"}[5m])))",
+          "legendFormat": "frontend (via Traefik)"
+        }
+      ],
+      "fieldConfig": { "defaults": { "unit": "s" } }
+    },
+    {
+      "id": 4,
+      "type": "timeseries",
+      "title": "Taux d'erreurs serveur (5xx)",
+      "gridPos": { "x": 0, "y": 12, "w": 12, "h": 8 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (job) (rate(http_requests_total{job=~\"api-ia|api-donnees\", status=\"5xx\"}[5m])) / clamp_min(sum by (job) (rate(http_requests_total{job=~\"api-ia|api-donnees\"}[5m])), 1e-9)",
+          "legendFormat": "{{job}}"
+        },
+        {
+          "refId": "B",
+          "expr": "sum by (service) (rate(traefik_service_requests_total{code=~\"5..\"}[5m])) / clamp_min(sum by (service) (rate(traefik_service_requests_total[5m])), 1e-9)",
+          "legendFormat": "traefik {{service}}"
+        }
+      ],
+      "fieldConfig": { "defaults": { "unit": "percentunit", "min": 0 } }
+    },
+    {
+      "id": 5,
+      "type": "timeseries",
+      "title": "Agent : /chat (débit et latence p95)",
+      "gridPos": { "x": 12, "y": 12, "w": 12, "h": 8 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "histogram_quantile(0.95, sum by (le) (rate(http_request_duration_seconds_bucket{job=\"api-ia\", handler=\"/chat\"}[5m])))",
+          "legendFormat": "latence p95 (s)"
+        },
+        {
+          "refId": "B",
+          "expr": "sum(rate(http_requests_total{job=\"api-ia\", handler=\"/chat\"}[5m]))",
+          "legendFormat": "questions/s"
+        }
+      ]
+    },
+    {
+      "id": 6,
+      "type": "stat",
+      "title": "Refus d'authentification (4xx sur /auth et /chat, 1 h)",
+      "gridPos": { "x": 0, "y": 20, "w": 12, "h": 4 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum(increase(http_requests_total{job=\"api-ia\", status=\"4xx\", handler=~\"/chat|/auth/.*\"}[1h]))",
+          "instant": true
+        }
+      ],
+      "options": { "reduceOptions": { "calcs": ["lastNotNull"] } }
+    },
+    {
+      "id": 7,
+      "type": "stat",
+      "title": "Appels API Données (1 h)",
+      "gridPos": { "x": 12, "y": 20, "w": 12, "h": 4 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum(increase(http_requests_total{job=\"api-donnees\", handler=~\"/films.*\"}[1h]))",
+          "instant": true
+        }
+      ],
+      "options": { "reduceOptions": { "calcs": ["lastNotNull"] } }
+    }
+  ]
+}

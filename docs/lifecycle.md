@@ -591,4 +591,67 @@ front → internet : bloqué ; front → API via Traefik en TLS vérifié : 200 
 uid 1001 pour front/api-ia/api-donnees ; rôle `horragor_ro` : `DELETE` refusé
 (*read-only transaction*) ; recommandations pgvector servies par l'API Données.
 
-*Chapitre suivant : monitoring + CD + Sphinx + Issues (G4).*
+---
+
+## Chapitre 11 — Le monitoring à 360° (Phase G4)
+
+Le brief : « monitoré à 360° en temps réel via une stack Docker unifiant
+Prometheus, Grafana, Uptime Kuma (pour la télémétrie des 3 composants) et
+Langfuse (pour l'agent) ». Tout démarre avec le même `docker compose up -d`.
+
+```
+api-ia ─────langfuse_ingest──> langfuse-web ──langfuse_net (internal)──> postgres · clickhouse · redis · minio · worker
+prometheus ──ia_net/data_net──> api-ia:8000 · api-donnees:8100 · traefik:8082   (/metrics)
+grafana ──obs_net──> prometheus            uptime-kuma ──(une patte par réseau)──> 9 sondes
+UIs : 127.0.0.1 → Langfuse :3000 · Kuma :3001 · Grafana :3002 · Prometheus :9090
+```
+
+### `monitoring/langfuse/compose.yml` — Langfuse dans la stack (`include:`)
+- **Entrées** : les secrets `LANGFUSE_*` du `.env` ; les traces envoyées par le
+  CallbackHandler d'api-ia (`LANGFUSE_HOST=http://langfuse-web:3000`).
+- **Sorties** : l'UI d'analyse sur `127.0.0.1:3000`.
+- **Ce qui s'y passe** : les 6 conteneurs du compose officiel v3, versions
+  épinglées (`3.210.0`, ClickHouse 26.6, Redis 7.4, Postgres 17), entrailles
+  sur un réseau **interne** sans aucun port publié, télémétrie coupée.
+  **Init headless** (`LANGFUSE_INIT_*`) : organisation, projet `HorRAGor3`,
+  ses clés (celles du `.env` : l'application n'a rien à changer) et compte
+  admin sont provisionnés au premier démarrage — zéro clic.
+- ⚠️ Piège rencontré : Next.js écoute sur `$HOSTNAME`, que Docker remplit avec
+  l'id du conteneur → une seule de ses deux pattes réseau répond, l'UI publiée
+  restait muette malgré « Ready ». Correctif : `HOSTNAME=0.0.0.0`.
+- L'ancienne instance hors repo a été arrêtée (volumes conservés).
+
+### `monitoring/prometheus/prometheus.yml` — la télémétrie des 3 composants
+- `api-ia` (couche Intelligence) et `api-donnees` (couche Données) : le
+  `/metrics` de `prometheus-fastapi-instrumentator`, présent depuis la
+  Phase A (règle « chaque service naît instrumenté ») ;
+- `traefik` (couche Présentation) : Streamlit n'expose pas de `/metrics`, on
+  mesure donc le trafic qui la sert (`traefik_service_*{service="front@file"}`,
+  activé par `--metrics.prometheus` sur l'entrée interne `:8082`).
+- Les cibles sont jointes par les réseaux privés ; `/metrics` n'est pas routé
+  en public (chapitre 10).
+
+### `monitoring/grafana/provisioning/` — dashboards as code
+- Datasource Prometheus + dashboard **« HorRAGor3 — les 3 couches »** :
+  disponibilité des cibles, débit et latence p95 par couche, taux de 5xx,
+  `/chat` (débit + latence de l'agent), refus d'authentification, appels à
+  l'API Données. Lecture seule (`allowUiUpdates: false`) : la vérité est dans
+  le repo. Rapports d'usage vers l'éditeur coupés.
+
+### `scripts/setup_uptime_kuma.py` — les sondes, as code aussi
+- Uptime Kuma n'a pas de provisioning par fichier : le script (idempotent,
+  `uv run --with uptime-kuma-api`) crée le compte admin puis 9 sondes — les
+  deux **entrées publiques en TLS vérifié** (Kuma fait confiance à la CA
+  locale via `NODE_EXTRA_CA_CERTS`), Streamlit, API IA, API Données, la
+  **chaîne API → Postgres** (sonde à mot-clé : `/films/41` doit contenir
+  « Hereditary »), Langfuse, Prometheus, Grafana.
+
+**Vu en réel** (2026-10-19) : 14 conteneurs démarrés par une seule commande ;
+cibles Prometheus `api-ia`, `api-donnees`, `traefik`, `prometheus` toutes
+**up** ; métriques `http_requests_total{job, handler, status}` et
+`traefik_service_requests_total{service="front@file"|"api@file"}` présentes ;
+dashboard provisionné dans le dossier HorRAGor3 ; Langfuse `/api/public/health`
+200 et projet `HorRAGor3` provisionné, accessible avec les clés du `.env` ;
+**9 sondes Uptime Kuma UP** (dont « keyword is found » sur la chaîne données).
+
+*Chapitre suivant : CD + Sphinx + Issues.*
