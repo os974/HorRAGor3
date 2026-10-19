@@ -1,0 +1,118 @@
+# CD HorRAGor3 (épilogue MLOps du brief : « pipeline CI/CD complet »).
+#   - Pull request : les 3 images sont construites (Dockerfiles validés) et la
+#     doc Sphinx construite en mode strict, sans rien publier.
+#   - Merge sur main : la CI (ci.yml) est rejouée comme garde-fou ; seulement
+#     si elle est verte, les 3 images partent sur GHCR (tags sha + latest) et
+#     la documentation est publiée sur GitHub Pages.
+name: CD
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: cd-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  # Publier uniquement depuis main (pas depuis une PR ni un dispatch de branche).
+  PUBLISH: ${{ github.event_name != 'pull_request' && github.ref == 'refs/heads/main' }}
+
+jobs:
+  ci:
+    name: CI (garde-fou avant livraison)
+    # Sur une PR, ci.yml tourne déjà de lui-même.
+    if: github.event_name != 'pull_request'
+    uses: ./.github/workflows/ci.yml
+
+  images:
+    name: Image ${{ matrix.image }}
+    needs: ci
+    # CI verte (main) ou sautée (PR) ; jamais après une CI rouge.
+    if: ${{ !cancelled() && (needs.ci.result == 'success' || needs.ci.result == 'skipped') }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    strategy:
+      fail-fast: false
+      matrix:
+        image: [api-ia, api-donnees, frontend]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Connexion à GHCR
+        if: env.PUBLISH == 'true'
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Tags et labels OCI
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ghcr.io/${{ github.repository_owner }}/horragor3-${{ matrix.image }}
+          tags: |
+            type=sha,format=short
+            type=raw,value=latest,enable={{is_default_branch}}
+
+      - name: Build (et push depuis main)
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: docker/${{ matrix.image }}.Dockerfile
+          push: ${{ env.PUBLISH == 'true' }}
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha,scope=${{ matrix.image }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.image }}
+
+  docs:
+    name: Documentation Sphinx
+    needs: ci
+    if: ${{ !cancelled() && (needs.ci.result == 'success' || needs.ci.result == 'skipped') }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+
+      - name: Set up Python
+        run: uv python install 3.12
+
+      - name: Install dependencies (groupe docs)
+        run: uv sync --group docs
+
+      - name: Build (avertissements = erreurs)
+        run: uv run --group docs sphinx-build -W -b html docs/sphinx docs/sphinx/_build/html
+
+      - name: Artefact Pages
+        if: env.PUBLISH == 'true'
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: docs/sphinx/_build/html
+
+  deploy-docs:
+    name: Publication GitHub Pages
+    needs: docs
+    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4

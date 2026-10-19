@@ -694,4 +694,47 @@ un seul avertissement ; 4 diagrammes Mermaid rendus en SVG dans Chrome headless
 téléchargeables présents ; autodoc de `rag_node`, `should_scrape_or_narrate`,
 `validate_film`, `refresh`…
 
-*Chapitre suivant : CD + Issues.*
+---
+
+## Chapitre 13 — Le pipeline CI/CD
+
+Le brief : « la mise en place d'un pipeline CI/CD complet ». Deux workflows
+GitHub Actions se partagent le travail.
+
+### `.github/workflows/ci.yml` — le garde-fou (Phase F, élargi en G)
+- **Entrées** : chaque PR (y compris les PR empilées entre branches), et
+  chaque merge sur `main` via un appel depuis cd.yml (`workflow_call`).
+- **Ce qui s'y passe** : ruff (lint + format), shellcheck sur les scripts
+  shell, puis `pytest --cov` : le périmètre vient du `pyproject.toml` (`src`,
+  `services`, `app_frontend` — « les deux API et l'UI ») et `fail_under = 80`
+  casse le build en dessous. Le seuil global pouvant masquer un périmètre
+  faible, **chacun** (API IA, API Données, UI) est aussi vérifié à 80 %.
+
+### `.github/workflows/cd.yml` — la livraison
+- **Entrées** : PR vers `main` (vérification) ; merge sur `main` (livraison).
+- **Sorties** : `ghcr.io/os974/horragor3-{api-ia,api-donnees,frontend}`
+  (tags `sha-xxxxxxx` + `latest`), et le site Sphinx sur GitHub Pages.
+- **Ce qui s'y passe** :
+  - **la CI d'abord** : sur `main`, le job `ci` rejoue ci.yml et les jobs
+    suivants en dépendent (`needs`) — une CI rouge ne publie **rien**. (Revue
+    QA : sans ce lien, les deux workflows partaient en parallèle et une
+    régression pouvait être poussée en `latest`.)
+  - **images** (matrice des 3 Dockerfiles) : construites à chaque PR (un
+    Dockerfile cassé bloque la PR), poussées seulement après merge, avec
+    labels OCI et cache GitHub Actions ;
+  - **docs** : `sphinx-build -W` à chaque PR (une docstring cassée bloque
+    aussi) ; sur `main`, l'artefact part vers Pages ;
+  - permissions minimales par job (`packages: write` pour les images,
+    `pages`/`id-token` pour le seul déploiement).
+- La doc se construit sans secret ni service : vérifié dans un clone vierge
+  (ni `.env`, ni index FAISS, ni base).
+
+**Vu en réel** (2026-10-19) : `actionlint` et `shellcheck` sans erreur ;
+build Sphinx strict réussi dans un clone propre ; les 3 images construites
+localement avec les mêmes Dockerfiles (cluster du chapitre 11) ; 118 tests,
+couverture 94 % (API IA 94 %, API Données 95 %, UI 95 %) — la revue QA a
+ajouté les tests du refresh silencieux côté UI et du fail-open Langfuse.
+Premier passage sur GitHub : au merge de la pile de branches dans `main`
+(Pages doit être activé en mode « GitHub Actions » dans les réglages du dépôt).
+
+*Chapitre suivant : GitHub Issues.*

@@ -23,8 +23,19 @@ class FakeResponse:
             raise httpx.HTTPStatusError("erreur", request=None, response=None)
 
 
-def _fake_api(monkeypatch, *, login_ok=True, answer="Récit des ténèbres."):
-    """Détourne httpx.post : /auth/login, /auth/refresh et /chat sont simulés."""
+def _fake_api(
+    monkeypatch,
+    *,
+    login_ok=True,
+    answer="Récit des ténèbres.",
+    stale_access=False,
+    refresh_ok=True,
+):
+    """Détourne httpx.post : /auth/login, /auth/refresh et /chat sont simulés.
+
+    ``stale_access`` : le premier access token (« acc ») est expiré → 401 sur
+    /chat ; ``refresh_ok`` : le refresh token est encore accepté ou non.
+    """
 
     def fake_post(url, json=None, headers=None, timeout=None):
         if url.endswith("/auth/login"):
@@ -34,10 +45,14 @@ def _fake_api(monkeypatch, *, login_ok=True, answer="Récit des ténèbres."):
                 200, {"access_token": "acc", "refresh_token": "ref", "token_type": "bearer"}
             )
         if url.endswith("/auth/refresh"):
+            if not refresh_ok:
+                return FakeResponse(401)
             return FakeResponse(
                 200, {"access_token": "acc2", "refresh_token": "ref2", "token_type": "bearer"}
             )
         if url.endswith("/chat"):
+            if stale_access and headers["Authorization"] == "Bearer acc":
+                return FakeResponse(401)
             return FakeResponse(
                 200,
                 {
@@ -99,6 +114,33 @@ def test_chat_affiche_recit_et_parcours(monkeypatch):
     meta = at.session_state["messages"][-1]
     assert meta["path"] == ["rag", "narration"]
     assert meta["sources"] == ["validate_film"]
+
+
+def _ask_with_session(monkeypatch, **api) -> AppTest:
+    """Session ouverte (acc/ref), une question posée, l'app rejouée."""
+    _fake_api(monkeypatch, **api)
+    at = AppTest.from_file(APP)
+    at.session_state["access_token"] = "acc"
+    at.session_state["refresh_token"] = "ref"
+    at.run()
+    at.chat_input[0].set_value("Parle-moi d'Alien").run(timeout=10)
+    return at
+
+
+def test_access_expire_prolonge_la_session_en_silence(monkeypatch):
+    """401 sur /chat → UN refresh, la paire est remplacée et la question rejouée."""
+    at = _ask_with_session(monkeypatch, stale_access=True)
+
+    assert at.session_state["access_token"] == "acc2"
+    assert at.session_state["refresh_token"] == "ref2"
+    assert at.session_state["messages"][-1]["content"] == "Récit des ténèbres."
+
+
+def test_refresh_refuse_demande_une_reconnexion(monkeypatch):
+    """Access expiré ET refresh refusé (révoqué/expiré) → message de reconnexion."""
+    at = _ask_with_session(monkeypatch, stale_access=True, refresh_ok=False)
+
+    assert "session expirée" in at.session_state["messages"][-1]["content"]
 
 
 def test_deconnexion_purge_la_session(monkeypatch):
