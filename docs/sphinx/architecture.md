@@ -24,7 +24,7 @@ flowchart LR
         apidon[API Données]
         db[(Postgres<br/>+ pgvector)]
     end
-    apiia -. host-gateway .-> ollama[(Ollama<br/>hôte)]
+    apiia -. "relais<br/>(passerelle Docker)" .-> ollama[(Ollama<br/>hôte)]
     apiia -. ia_net .-> web((Wikipédia<br/>DuckDuckGo))
 ```
 
@@ -41,7 +41,7 @@ flowchart LR
     apiia -- "traces de l'agent<br/>(langfuse_ingest)" --> langfuse[Langfuse :3000]
     prometheus[Prometheus :9090] -- "/metrics" --> apiia & apidon & traefik
     grafana[Grafana :3002] --> prometheus
-    kuma[Uptime Kuma :3001] -- "9 sondes" --> cluster
+    kuma[Uptime Kuma :3001] -- "10 sondes" --> cluster
 ```
 
 Les interfaces d'administration (ports ci-dessus) ne sont liées qu'à

@@ -64,7 +64,8 @@ ou importe `certs/ca.pem` dans le navigateur) et connecte-toi avec
 `APP_USERNAME`/`APP_PASSWORD` du `.env`. Architecture : Traefik (127.0.0.1:443,
 seul port applicatif publié) → Streamlit → API IA (JWT) → réseau privé étanche →
 API Données → Postgres + pgvector (conteneur, réseau interne dédié). Ollama reste
-sur l'hôte et doit être joignable depuis les conteneurs (voir l'issue ouverte).
+sur l'hôte (GPU) : le service `ollama-relay` l'expose aux conteneurs sur la seule
+passerelle Docker (`172.17.0.1`), jamais sur le réseau local.
 
 Monitoring 360° (interfaces sur la boucle locale uniquement) :
 
@@ -119,4 +120,4 @@ CI/CD GitHub Actions :
   - [x] Documentation Sphinx (2 API, schémas relationnels, carte du graphe)
   - [x] CI/CD (workflows en place ; premier passage au merge sur `main`)
   - [ ] GitHub Issues (formulaires en place ; tickets à créer)
-  - [ ] Ollama joignable depuis le cluster (récit de bout en bout en conteneurs)
+  - [x] Récit de bout en bout en conteneurs (relais Ollama, traces dans le Langfuse intégré)

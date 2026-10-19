@@ -101,7 +101,7 @@ Agent ReAct LangGraph (déjà `langgraph>=1.2.4` !) avec nœud Juge anti-halluci
 ### Décisions Phase G (2026-10-19, après relecture intégrale du brief)
 
 4. **Base de données conteneurisée** : Postgres + pgvector dans un réseau interne dédié (`db_net`, joint par la seule API Données), alimenté par un dump de Supabase. Le brief exige que « l'ensemble » (BDD + API dédiée) soit conteneurisé et parle d'« infrastructure souveraine » ; Supabase ne sert plus qu'en mode dev hors cluster. Remplace la décision G1 « Supabase encapsulé sans migration ».
-5. **Langfuse intégré à la stack Docker du projet** (« stack Docker unifiant Prometheus, Grafana, Uptime Kuma et Langfuse ») ; **Ollama reste sur l'hôte** (GPU, poids des modèles) — écart documenté.
+5. **Langfuse intégré à la stack Docker du projet** (« stack Docker unifiant Prometheus, Grafana, Uptime Kuma et Langfuse ») ; **Ollama reste sur l'hôte** (GPU, poids des modèles) — écart documenté ; un relais conteneurisé (`ollama-relay`) l'expose aux conteneurs sur la seule passerelle Docker, sans toucher à l'hôte.
 6. **CD** : build + push des 3 images sur GHCR et publication de la doc Sphinx sur GitHub Pages à chaque merge sur `main`.
 7. **Auth** : le brief dit « Refresh Tokens » ; l'implémentation retenue est un couple de JWT access/refresh (choix d'implémentation, pas une exigence textuelle).
 
@@ -143,7 +143,7 @@ Sauvegarder ce plan dans la mémoire persistante (`~/.claude/projects/-home-oliv
 - `horragor-ecosysteme.md` (type `project`) : cartographie HorRAGor1/2/MultiAgent et chemins des briques réutilisables
 - Mettre à jour `MEMORY.md` avec les pointeurs
 
-> **État d'avancement** — ✅ A (commit `8978270`) · ✅ B (`958a042`) · ✅ C (`89f6adb`) · ✅ D (`9da4371`) · ✅ E (`6d98050`, Langfuse + routage sensible au type de question) · ✅ F (`abd56b1`, 83 tests, 92 %, CI) · G : ✅ G1 API Données (`4c91601`) · ✅ G2 Refresh Tokens JWT (`5299243`) · ✅ G3 cluster Docker + TLS (`6716f16`) · ✅ BDD conteneurisée (`97efbf4`) · ✅ durcissement après revue de sécurité (`4c9f80d`) · ✅ monitoring 360° (`5cba9bb`) · ✅ Sphinx (`d1f3f26`) · ✅ CI/CD (`eb55b2d`, premier passage au merge sur `main`) · 🔧 Issues (formulaires `cb190f1`, tickets à créer) · ⚠️ Ollama injoignable depuis le cluster (arbitrage hôte en attente). Branches empilées, à merger dans l'ordre.
+> **État d'avancement** — ✅ A (commit `8978270`) · ✅ B (`958a042`) · ✅ C (`89f6adb`) · ✅ D (`9da4371`) · ✅ E (`6d98050`, Langfuse + routage sensible au type de question) · ✅ F (`abd56b1`, 83 tests, 92 %, CI) · G : ✅ G1 API Données (`4c91601`) · ✅ G2 Refresh Tokens JWT (`5299243`) · ✅ G3 cluster Docker + TLS (`6716f16`) · ✅ BDD conteneurisée (`97efbf4`) · ✅ durcissement après revue de sécurité (`4c9f80d`) · ✅ monitoring 360° (`5cba9bb`) · ✅ Sphinx (`d1f3f26`) · ✅ CI/CD (`eb55b2d`, premier passage au merge sur `main`) · 🔧 Issues (formulaires `cb190f1`, tickets à créer) · ✅ relais Ollama, récit de bout en bout en conteneurs (branche `fix/ollama-relais`). Branches empilées, à merger dans l'ordre.
 > (Hashs réécrits le 2026-07-10 avant le premier push : correction de l'email d'auteur → `olivier.schollaert@live.be`.)
 > Réalisations notables : E2E validé sur les deux chemins avec qwen2.5:7b (18 s / 26 s) ; jugement de récolte déterministe (marqueur `"found"`) ; un canal de messages par agent (context trimming) ; API `/health` + `/metrics` + `/chat` et front Streamlit vérifiés en réel sur Supabase (TMDB + pgvector).
 
