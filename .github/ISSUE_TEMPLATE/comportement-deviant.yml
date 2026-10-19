@@ -13,6 +13,7 @@ body:
         - Isolation de contexte (la narration voit la plomberie)
         - Sécurité (accès, jetons, exposition réseau)
         - Performance (latence, tokens, coût)
+        - CI/CD (tests, images, publication)
         - Autre
     validations:
       required: true

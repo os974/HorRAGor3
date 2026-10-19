@@ -22,6 +22,7 @@ construction : elles ne peuvent pas diverger de ce qui tourne.
 architecture
 graphe
 livre
+console
 ```
 
 ```{toctree}

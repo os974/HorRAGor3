@@ -25,7 +25,7 @@ flowchart LR
         db[(Postgres<br/>+ pgvector)]
     end
     apiia -. "relais<br/>(passerelle Docker)" .-> ollama[(Ollama<br/>hôte)]
-    apiia -. ia_net .-> web((Wikipédia<br/>DuckDuckGo))
+    apiia -. ia_net .-> web((Wikipédia<br/>DuckDuckGo<br/>TMDB))
 ```
 
 ## L'observabilité
@@ -57,7 +57,7 @@ Les interfaces d'administration (ports ci-dessus) ne sont liées qu'à
 | UI isolée, communication chiffrée vers l'API IA | front sur `front_net` (internal) : son seul chemin vers l'IA est Traefik en TLS vérifié |
 | Infrastructure souveraine | base, Langfuse et monitoring conteneurisés ; aucune télémétrie éditeur ; seul Ollama (GPU) reste sur l'hôte |
 | Monitoring 360° | Prometheus + Grafana + Uptime Kuma (3 couches) et Langfuse (agent) |
-| Journalisation de bout en bout | Loguru partout, logs JSON, `session_id` corrélé avec les traces Langfuse |
+| Journalisation de bout en bout | Loguru dans les deux API et l'UI (uvicorn compris), logs JSON portant `session_id` et `request_id` ; un `session_id` par conversation, partagé avec les traces Langfuse |
 
 Le détail fichier par fichier, dans l'ordre du flux d'une requête, se trouve
 dans {doc}`livre`.

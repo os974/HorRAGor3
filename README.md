@@ -13,6 +13,7 @@ Flux : `START → rag → [routeur] → (narration | scraper → narration) → 
 ## Documentation
 
 - **Brief** : `docs/HorRAGor BOT Partie 3.pdf`
+- **Documentation technique en ligne** (Sphinx) : https://os974.github.io/HorRAGor3/
 - **Plan directeur** (phases A→G, règles de travail) : [docs/plan-horragor3.md](docs/plan-horragor3.md)
 - **Lifecycle** (le « livre du projet », tenu au fil de l'eau) : [docs/lifecycle.md](docs/lifecycle.md)
 - **Lire la console et les logs** (guide pour non-initiés) : [docs/lire-la-console-et-les-logs.md](docs/lire-la-console-et-les-logs.md)
@@ -22,12 +23,18 @@ Flux : `START → rag → [routeur] → (narration | scraper → narration) → 
 - [uv](https://docs.astral.sh/uv/), Python ≥ 3.12
 - [Ollama](https://ollama.com) avec `ollama pull qwen2.5:7b` et `ollama pull nomic-embed-text`
 - Un `.env` rempli d'après `.env.example`
-- L'index FAISS dans `data/faiss_index/` (copié depuis HorRAGor2, ou reconstruit)
-- Docker (cluster et monitoring)
+- L'index FAISS dans `data/faiss_index/` (gitignoré, ~100 Mo) : copié depuis
+  `../HorRAGor2/faiss_index/`, ou reconstruit depuis la base (Ollama et
+  `DATABASE_URL` requis, quelques minutes) :
+  `uv run python -m scripts.build_faiss`
+- Docker avec Compose ≥ 2.20 (cluster et monitoring ; le compose utilise `include:`)
 
 Hors cluster (mode dev), l'API lit la base directement via `DATABASE_URL`
-(Supabase) ; Langfuse est optionnel (sans clés, l'app tourne à l'identique,
-fail-open) — il peut être lancé seul avec `docker compose up -d langfuse-web`.
+(Supabase). Langfuse est optionnel (sans clés, l'app tourne à l'identique,
+fail-open). Il peut être lancé seul avec
+`docker compose up -d langfuse-web langfuse-worker` (le worker ingère les
+traces) ; Compose lisant tout le fichier, les variables exigées du cluster
+doivent alors être renseignées dans le `.env`.
 
 ## Installation
 
@@ -44,9 +51,14 @@ uv run uvicorn src.main:app --reload
 
 # Terminal 2 — le front
 uv run streamlit run app_frontend.py
+
+# Optionnel — l'API Données, comme en cluster (puis DATA_API_URL=http://127.0.0.1:8100 dans le .env)
+uv run uvicorn services.data_api.main:app --port 8100
 ```
 
-Endpoints : `GET /health`, `GET /metrics` (Prometheus), `POST /auth/login`, `POST /auth/refresh`, `POST /chat` (JWT requis).
+Endpoints de l'API IA : `GET /health`, `GET /metrics` (Prometheus), `POST /auth/login`,
+`POST /auth/refresh`, `POST /chat` (JWT requis). API Données : `GET /films/{id}`,
+`GET /films/{id}/similar`, `/health`, `/metrics`.
 
 ## Lancement en cluster (Docker)
 
@@ -54,7 +66,15 @@ Endpoints : `GET /health`, `GET /metrics` (Prometheus), `POST /auth/login`, `POS
 ./scripts/gen_certs.sh     # une fois : CA locale + certificat TLS
 ./scripts/dump_supabase.sh # une fois : dump de la base source (lit DATABASE_URL)
 docker compose up -d --build
+docker compose ps          # les 15 conteneurs doivent être « healthy »
 ```
+
+Arrêt : `docker compose down` (les volumes, donc la base et les traces, sont
+conservés ; `docker compose down -v` les supprime).
+
+Les images des 3 couches sont aussi publiées par le CD, publiques :
+`docker pull ghcr.io/os974/horragor3-{api-ia,api-donnees,frontend}:latest`
+(tags `latest` et `sha-<commit>`). Le compose, lui, les construit localement.
 
 Le `.env` doit aussi contenir les secrets du cluster (`POSTGRES_*`, `JWT_SECRET`,
 `APP_*`, `LANGFUSE_*`, `GRAFANA_ADMIN_PASSWORD`, `KUMA_*` — voir `.env.example`).
@@ -69,12 +89,12 @@ passerelle Docker (`172.17.0.1`), jamais sur le réseau local.
 
 Monitoring 360° (interfaces sur la boucle locale uniquement) :
 
-| Outil | URL | Rôle |
-|---|---|---|
-| Langfuse | http://localhost:3000 | traces de l'agent (nœuds, tokens, latences, outils) |
-| Uptime Kuma | http://localhost:3001 | disponibilité des 3 couches et des outils |
-| Grafana | http://localhost:3002 | dashboard « HorRAGor3 — les 3 couches » |
-| Prometheus | http://localhost:9090 | métriques brutes (APIs + Traefik) |
+| Outil | URL | Rôle | Connexion |
+|---|---|---|---|
+| Langfuse | http://localhost:3000 | traces de l'agent (nœuds, tokens, latences, outils), par conversation | `LANGFUSE_INIT_USER_EMAIL` / `LANGFUSE_INIT_USER_PASSWORD` |
+| Uptime Kuma | http://localhost:3001 | disponibilité des 3 couches et des outils | `KUMA_ADMIN_USER` / `KUMA_ADMIN_PASSWORD` |
+| Grafana | http://localhost:3002 | dashboard « HorRAGor3 — les 3 couches » | `admin` / `GRAFANA_ADMIN_PASSWORD` |
+| Prometheus | http://localhost:9090 | métriques brutes (APIs + Traefik) | — |
 
 Au premier lancement, créer les sondes Uptime Kuma :
 `uv run --env-file .env --with uptime-kuma-api==1.2.1 python scripts/setup_uptime_kuma.py`.
@@ -89,12 +109,13 @@ uv run --group docs sphinx-build -W -b html docs/sphinx docs/sphinx/_build/html
 
 Doc automatique des deux API (endpoints générés depuis OpenAPI), schémas
 relationnels (MCD/MLD/MPD), cartographie du graphe générée depuis
-`src/graph/pipeline.py`, et le livre du projet (`docs/lifecycle.md`).
+`src/graph/pipeline.py` avec une page par agent, le livre du projet
+(`docs/lifecycle.md`) et le guide de la console.
 
 ## Tests
 
 ```bash
-uv run pytest --cov        # 118 tests hermétiques (ni Ollama, ni réseau), verrou à 80 %
+uv run pytest --cov        # 123 tests hermétiques (ni Ollama, ni réseau), verrou à 80 %
 uv run ruff check . && uv run ruff format --check .
 ```
 
@@ -123,3 +144,6 @@ CI/CD GitHub Actions :
   - [x] CI/CD (images publiques sur GHCR, doc en ligne : https://os974.github.io/HorRAGor3/)
   - [x] GitHub Issues (formulaires + un ticket archivé par anomalie : https://github.com/os974/HorRAGor3/issues)
   - [x] Récit de bout en bout en conteneurs (relais Ollama, traces dans le Langfuse intégré)
+- [x] Vérification finale contre la lettre du brief (tickets #22–#25, livre ch. 17) : règle de
+  suffisance dans `router.py`, `app = workflow.compile()`, corrélation par conversation, Loguru
+  de bout en bout, index FAISS reproductible, analyse Langfuse chiffrée

@@ -189,7 +189,7 @@ def find_similar_horror_movies(film_id: int, k: int = 5) -> list[FilmRef]:
 # interne validate → id → requête, pour épargner au petit modèle la gestion
 # des identifiants. Les docstrings ci-dessous sont les descriptions lues par
 # le LLM pour choisir son outil. Retour = JSON compact avec un champ "found" :
-# c'est ce marqueur que le nœud RAG scrute pour juger sa récolte (déterministe).
+# c'est ce marqueur que le nœud RAG récolte et que le routeur juge (déterministe).
 
 
 @tool
