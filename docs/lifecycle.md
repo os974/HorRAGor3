@@ -396,8 +396,9 @@ pour verrouiller les échanges avec l'IHM ». Le flux d'une session :
   du `.env`) ; `POST /auth/refresh` (le jeton long).
 - **Sorties** : une paire de JWT signés HS256 (`JWT_SECRET`) — **access**
   ~15 min (présenté en `Authorization: Bearer` à chaque `/chat` : s'il fuite,
-  il expire vite) + **refresh** ~7 j (sert UNIQUEMENT à renouveler, avec
-  rotation complète à chaque usage).
+  il expire vite) + **refresh** ~12 h (sert UNIQUEMENT à renouveler, avec
+  rotation complète à chaque usage ; durée révisée au chapitre 10, avec la
+  révocation des refresh rejoués).
 - **Ce qui s'y passe** : chaque jeton porte son `type` — un refresh présenté
   sur `/chat` est refusé, un access sur `/auth/refresh` aussi. La dépendance
   `require_access` verrouille les routes métier (401 explicites : jeton
@@ -515,10 +516,79 @@ internet : bloqué ; api-ia → db : nom introuvable ; depuis l'hôte, seul le 4
 répond (front HTTPS 200, certificat vérifié contre la CA locale ; login → jeton,
 `/chat` sans jeton → 401).
 
-⚠️ **Anomalie découverte** : `/chat` en cluster renvoie le repli gothique —
+⚠️ **Anomalie découverte** (détaillée au chapitre 10) : `/chat` en cluster renvoie le repli gothique —
 Ollama, sur l'hôte, n'écoute que sur `127.0.0.1:11434` et refuse les connexions
 venues des conteneurs (`host.docker.internal` → *Connection refused*). Le
 cluster n'avait donc jamais servi un récit de bout en bout. Correctif en attente
 d'arbitrage (configuration d'Ollama côté hôte).
+
+---
+
+## Chapitre 10 — Le durcissement du cluster (revue de sécurité)
+
+Une revue de sécurité du cluster a relevé des écarts entre ce que le brief
+exige et ce que la topologie **garantit**. Chaque correctif retire du code
+ou une capacité plutôt que d'en ajouter.
+
+### `docker-compose.yml` — la topologie qui impose les règles
+```
+navigateur ──127.0.0.1:443──> traefik:8443 ──front_net (internal)──> frontend
+frontend ──front_net──> traefik (alias api.horragor.localhost:8443) ──ia_net──> api-ia
+api-ia ──data_net (internal)──> api-donnees ──db_net (internal)──> db
+```
+- **Le chiffrement UI → IA est imposé par le réseau** : le front n'est que sur
+  `front_net` (interne), où seul Traefik l'attend. `http://api-ia:8000` lui
+  est inaccessible, tout comme internet (télémétrie Streamlit coupée aussi :
+  `--browser.gatherUsageStats false`).
+- **443 lié à 127.0.0.1** : les ports publiés par Docker contournent le
+  pare-feu de l'hôte ; seule la machine elle-même atteint le cluster.
+- **Moindre privilège** : ancre YAML `x-hardening` (`no-new-privileges`,
+  `cap_drop: ALL`) sur tous les services. Les trois images applicatives
+  tournent sous l'uid 1001 (seul `logs/` est inscriptible) et lancent
+  directement les binaires du venv. Traefik écoute sur 8443 (aucun besoin du
+  privilège de port bas) et ne garde que `DAC_READ_SEARCH` pour lire la clé
+  du certificat ; Postgres garde le strict nécessaire à son entrypoint.
+- `depends_on: condition: service_healthy` sur toute la chaîne (db →
+  api-donnees → api-ia → frontend) ; secrets d'auth exigés (`${VAR:?}`).
+- Images épinglées : `traefik:v3.7.15`, `uv:0.9.30-python3.12-bookworm-slim`.
+
+### `traefik/dynamic.yml` — le routage déclaré en fichier
+- **Plus de socket Docker** : même monté en lecture seule, il donnait au seul
+  composant exposé l'équivalent de root sur l'hôte. Les deux routes fixes
+  (front, API) sont déclarées dans le fichier, les labels disparaissent.
+- La route publique de l'API exclut `/metrics`, `/docs`, `/redoc` et
+  `/openapi.json` (404) : la métrologie se lit sur le réseau privé.
+
+### `scripts/gen_certs.sh` — une CA qui ne peut signer que *.localhost
+- `nameConstraints=critical,permitted;DNS:localhost` : même importée dans un
+  navigateur, la CA ne peut pas servir à usurper un autre site. Seuls
+  `cluster.pem`/`cluster.key` sont montés dans Traefik — la clé de la CA ne
+  quitte plus l'hôte. (Anciens certificats conservés dans
+  `certs/backup-2026-10-19/` ; réimporter `certs/ca.pem` si le navigateur
+  faisait confiance à l'ancienne CA.)
+
+### `src/auth.py` — la révocation des refresh rejoués
+- Chaque refresh porte un `jti` ; le registre en mémoire ne garde que le
+  dernier émis par sujet. Un refresh déjà consommé qui revient (vol
+  présumé) → 401 « jeton révoqué » **et** révocation de la session entière.
+- Refresh ramené à 12 h (les jetons vivent dans la session Streamlit, qui
+  meurt avec l'onglet) ; claims `exp`/`sub`/`type` (+ `jti`) exigés ;
+  identifiants comparés en temps constant (`hmac.compare_digest`) ; secret
+  absent → 503 propre, jamais de 500.
+- `src/main.py` : middleware CORS supprimé — le navigateur n'appelle jamais
+  l'API, c'est le serveur Streamlit qui le fait.
+
+### `docker/db-init/01-restore.sh` — un rôle en lecture seule
+- L'API Données se connecte avec `horragor_ro` : `SELECT` seulement,
+  `default_transaction_read_only = on`, `statement_timeout = 30s`. Le
+  superutilisateur ne sort jamais du conteneur db.
+
+**Vu en réel** (2026-10-19) : 5 services *healthy* ; seul `127.0.0.1:443`
+publié ; front HTTPS 200 ; `/metrics`, `/docs`, `/openapi.json` → 404 en
+public ; rejeu d'un refresh consommé → 401, puis le refresh légitime suivant
+aussi → 401 (session révoquée) ; front → `api-ia:8000` en clair : bloqué ;
+front → internet : bloqué ; front → API via Traefik en TLS vérifié : 200 ;
+uid 1001 pour front/api-ia/api-donnees ; rôle `horragor_ro` : `DELETE` refusé
+(*read-only transaction*) ; recommandations pgvector servies par l'API Données.
 
 *Chapitre suivant : monitoring + CD + Sphinx + Issues (G4).*

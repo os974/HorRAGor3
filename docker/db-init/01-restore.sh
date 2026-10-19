@@ -30,4 +30,16 @@ CREATE INDEX IF NOT EXISTS movie_embeddings_hnsw
 ANALYZE;
 SQL
 
+# Le rôle de l'API Données : lecture seule, requêtes bornées dans le temps.
+# Le superutilisateur ne sort jamais de ce conteneur.
+"${psql[@]}" -v ro_user="$POSTGRES_RO_USER" -v ro_pass="$POSTGRES_RO_PASSWORD" \
+  -v db="$POSTGRES_DB" <<'SQL'
+CREATE ROLE :"ro_user" LOGIN PASSWORD :'ro_pass';
+GRANT CONNECT ON DATABASE :"db" TO :"ro_user";
+GRANT USAGE ON SCHEMA public TO :"ro_user";
+GRANT SELECT ON ALL TABLES IN SCHEMA public TO :"ro_user";
+ALTER ROLE :"ro_user" SET default_transaction_read_only = on;
+ALTER ROLE :"ro_user" SET statement_timeout = '30s';
+SQL
+
 echo "Base HorRAGor restaurée : $("${psql[@]}" -Atc 'select count(*) from movies') films."

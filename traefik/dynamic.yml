@@ -1,5 +1,34 @@
-# Configuration dynamique Traefik : le certificat TLS du cluster
-# (généré par scripts/gen_certs.sh, signé par la CA locale montée dans le front).
+# Configuration dynamique Traefik : TOUT le routage du cluster, déclaré en
+# fichier (pas de provider Docker, donc pas de socket Docker monté).
+http:
+  routers:
+    front:
+      rule: Host(`horragor.localhost`)
+      entryPoints: [websecure]
+      service: front
+      tls: {}
+    # Côté public, l'API n'expose que ses routes métier : /metrics et la doc
+    # OpenAPI restent internes (Prometheus les lit sur le réseau privé).
+    api:
+      rule: >-
+        Host(`api.horragor.localhost`)
+        && !PathPrefix(`/metrics`) && !PathPrefix(`/docs`)
+        && !PathPrefix(`/redoc`) && !Path(`/openapi.json`)
+      entryPoints: [websecure]
+      service: api
+      tls: {}
+  services:
+    front:
+      loadBalancer:
+        servers:
+          - url: http://frontend:8501
+    api:
+      loadBalancer:
+        servers:
+          - url: http://api-ia:8000
+
+# Le certificat du cluster (scripts/gen_certs.sh), signé par la CA locale
+# montée dans le front.
 tls:
   certificates:
     - certFile: /certs/cluster.pem
