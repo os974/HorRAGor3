@@ -740,7 +740,7 @@ ajouté les tests du refresh silencieux côté UI et du fail-open Langfuse.
 **Vu sur GitHub** (2026-10-20) : CI et CD en mode PR verts sur les PR de la
 pile ; premier CD réel au merge de #15 dans `main` — 6 jobs verts (CI rejouée
 en garde-fou, 3 images, doc, Pages) ; images `ghcr.io/os974/horragor3-*`
-publiées en `latest` + `sha-f73aff2` et **publiques** (téléchargeables sans
+publiées en `latest` + `sha-<commit>` et **publiques** (téléchargeables sans
 compte, visibilité héritée du dépôt) ; doc en ligne sur
 https://os974.github.io/HorRAGor3/ (Pages activé en mode « GitHub Actions »).
 
