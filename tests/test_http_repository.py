@@ -65,12 +65,11 @@ def test_erreur_serveur_remonte(monkeypatch):
     with pytest.raises(httpx.HTTPStatusError):
         repo.get_metadata(41)
     # Et la couche outils, elle, dégrade sans lever :
-    rag_tool.set_repository(repo)
+    monkeypatch.setattr(rag_tool, "get_repository", lambda: repo)
     assert rag_tool.query_movie_metadata(41) is None
 
 
 def test_rag_tool_choisit_le_repo_selon_la_config(monkeypatch):
-    """data_api_url définie → client HTTP ; vide → accès direct Supabase."""
+    """data_api_url définie → client HTTP ; vide → accès SQL direct."""
     monkeypatch.setattr(settings, "data_api_url", "http://api-donnees:8100")
-    rag_tool._repository = None
-    assert isinstance(rag_tool._get_repository(), HttpFilmRepository)
+    assert isinstance(rag_tool.get_repository(), HttpFilmRepository)

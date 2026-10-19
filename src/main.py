@@ -32,7 +32,7 @@ from src.contracts.schemas import ChatRequest, ChatResponse
 from src.data.faiss_index import TitleIndex
 from src.engine import get_engine
 from src.logging_conf import setup_logging
-from src.tools.rag_tool import set_index
+from src.tools.rag_tool import get_index
 
 # Un seul flux de logs pour toute l'app, uvicorn compris (règle : Loguru partout).
 setup_logging()
@@ -49,8 +49,7 @@ async def lifespan(_: FastAPI):
         La main à l'application, index prêt en RAM.
     """
     if TitleIndex.exists():
-        index = TitleIndex.load()
-        set_index(index)
+        index = get_index()  # chargé une fois, gardé en cache pour tout le processus
         logger.info("Index FAISS chargé : {} titres en RAM", len(index))
     else:
         logger.warning(

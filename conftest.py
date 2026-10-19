@@ -1,7 +1,8 @@
-"""Fixtures partagées : isolation des singletons entre les tests.
+"""Fixtures partagées : isolation des fabriques en cache entre les tests.
 
-Les outils utilisent des singletons injectables (index FAISS, repository) ;
-on les remet à zéro autour de chaque test pour éviter toute pollution croisée.
+Les outils obtiennent l'index FAISS et le repository par des fabriques
+``lru_cache`` ; on vide ces caches autour de chaque test pour éviter toute
+pollution croisée.
 """
 
 import pytest
@@ -11,9 +12,9 @@ from src.tools import rag_tool
 
 @pytest.fixture(autouse=True)
 def _reset_singletons():
-    """Réinitialise les singletons de rag_tool avant et après chaque test."""
-    rag_tool._index = None
-    rag_tool._repository = None
+    """Vide les caches des fabriques de rag_tool avant et après chaque test."""
+    rag_tool.get_index.cache_clear()
+    rag_tool.get_repository.cache_clear()
     yield
-    rag_tool._index = None
-    rag_tool._repository = None
+    rag_tool.get_index.cache_clear()
+    rag_tool.get_repository.cache_clear()
