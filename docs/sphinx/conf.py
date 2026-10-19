@@ -86,6 +86,8 @@ def generate(_app=None) -> None:
     Args:
         _app: L'application Sphinx (hook ``builder-inited``), inutilisée.
     """
+    # Imports différés : le code n'est chargé qu'au moment de construire,
+    # une fois sys.path complété et la configuration Sphinx lue.
     from services.data_api.main import app as data_api
     from src.graph.pipeline import app as graph
     from src.main import app as ia_api
