@@ -1,0 +1,69 @@
+%% MPD réel de la base du cluster (conteneur db, PostgreSQL 17 + pgvector),
+%% extrait d'information_schema le 2026-10-19.
+erDiagram
+    movies ||--o| movie_embeddings : "movie_id"
+    genres ||--o{ movie_genres : "genre_id"
+    movies ||--o{ movie_genres : "movie_id"
+    movies ||--o{ movie_keywords : "movie_id"
+    movies ||--o{ ratings : "movie_id"
+    movies ||--o{ sources_metadata : "movie_id"
+
+    genres {
+        integer id PK
+        integer tmdb_genre_id UK
+        varchar_100 name UK
+    }
+
+    movie_embeddings {
+        bigint movie_id PK,FK
+        vector_768 embedding
+    }
+
+    movie_genres {
+        integer movie_id PK,FK
+        integer genre_id PK,FK
+    }
+
+    movie_keywords {
+        integer movie_id PK,FK
+        varchar_100 keyword PK
+    }
+
+    movies {
+        integer id PK
+        integer tmdb_id UK
+        varchar_20 imdb_id UK
+        varchar_500 title
+        varchar_500 original_title
+        varchar_10 original_language
+        text overview
+        text tagline
+        date release_date
+        integer runtime_minutes
+        bigint budget
+        bigint revenue
+        varchar_50 status
+        varchar_300 collection_name
+        float8 popularity
+        varchar_300 poster_path
+        integer overview_word_count
+        timestamp created_at
+        timestamp updated_at
+    }
+
+    ratings {
+        integer id PK
+        integer movie_id UK,FK
+        varchar_50 source UK
+        float8 score
+        float8 audience_score
+        integer vote_count
+        text critics_consensus
+    }
+
+    sources_metadata {
+        integer id PK
+        integer movie_id FK
+        varchar_100 source_name
+        timestamp ingested_at
+    }

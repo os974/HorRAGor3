@@ -464,8 +464,6 @@ navigateur ── https://horragor.localhost ──> traefik (443, SEUL port pub
 
 ---
 
----
-
 ## Chapitre 9 — La base souveraine (BDD conteneurisée)
 
 Relecture du brief : « La base de données doit être encapsulée derrière sa
@@ -654,4 +652,46 @@ dashboard provisionné dans le dossier HorRAGor3 ; Langfuse `/api/public/health`
 200 et projet `HorRAGor3` provisionné, accessible avec les clés du `.env` ;
 **9 sondes Uptime Kuma UP** (dont « keyword is found » sur la chaîne données).
 
-*Chapitre suivant : CD + Sphinx + Issues.*
+---
+
+## Chapitre 12 — La documentation Sphinx (gouvernance)
+
+Le brief : « L'intégralité de cette usine logicielle doit être documentée
+proprement via Sphinx [...] obligatoirement la doc automatique des API, les
+schémas relationnels de la base de données, ainsi que la cartographie
+complète de votre graphe multi-agent ».
+
+### `docs/sphinx/conf.py` — une doc qui ne peut pas mentir
+- **Entrées** : le code lui-même (`src/`, `services/`), les docstrings Google
+  style écrites au fil de l'eau depuis la Phase A (règle de travail).
+- **Sorties** : le site HTML (`docs/sphinx/_build/html`, gitignoré).
+- **Ce qui s'y passe** : au démarrage de chaque construction (`builder-inited`),
+  trois artefacts sont **générés depuis le code** dans `_generated/` :
+  la carte Mermaid du graphe (`pipeline.app.get_graph().draw_mermaid()`), la
+  table des endpoints de chaque API et sa spécification OpenAPI
+  (`app.openapi()`, téléchargeable). Extensions : autodoc + napoleon
+  (docstrings), viewcode (lien vers le source), myst-parser (pages Markdown,
+  inclusion du livre et du plan), sphinxcontrib-mermaid ; thème furo.
+  Dépendances isolées dans le groupe uv `docs` (absentes des images).
+- ⚠️ Piège rencontré : LangGraph préfixe son Mermaid d'un front matter YAML
+  (`---config---`) que MyST prenait pour les options de la directive
+  (`JSONDecodeError`) — retiré à la génération.
+
+### Les pages
+- **Architecture** : chemin d'une question à travers les 3 couches et leurs
+  réseaux, l'observabilité, et la table « exigence du brief → mise en œuvre ».
+- **Cartographie du graphe** : le diagramme généré, le rôle de chaque nœud et
+  routeur, puis l'autodoc du State, des nœuds, des routeurs et du câblage.
+- **API IA / API Données** : endpoints (avec la protection JWT) + autodoc.
+- **Schémas relationnels** : MCD et MLD repris de la merise de HorRAGor1,
+  MPD **réel** extrait de la base du cluster (`information_schema`), qui
+  montre `movie_embeddings` (`vector(768)`, ajoutée par HorRAGor2).
+- **Le livre du projet** (ce document) et le plan directeur, inclus tels quels.
+
+**Vu en réel** (2026-10-19) : `sphinx-build -W` (avertissements = erreurs) sans
+un seul avertissement ; 4 diagrammes Mermaid rendus en SVG dans Chrome headless
+(graphe, MLD, MPD, architecture) ; endpoints des deux API et OpenAPI
+téléchargeables présents ; autodoc de `rag_node`, `should_scrape_or_narrate`,
+`validate_film`, `refresh`…
+
+*Chapitre suivant : CD + Issues.*
