@@ -736,8 +736,20 @@ build Sphinx strict réussi dans un clone propre ; les 3 images construites
 localement avec les mêmes Dockerfiles (cluster du chapitre 11) ; 118 tests,
 couverture 94 % (API IA 94 %, API Données 95 %, UI 95 %) — la revue QA a
 ajouté les tests du refresh silencieux côté UI et du fail-open Langfuse.
-Premier passage sur GitHub : au merge de la pile de branches dans `main`
-(Pages doit être activé en mode « GitHub Actions » dans les réglages du dépôt).
+
+**Vu sur GitHub** (2026-10-20) : CI et CD en mode PR verts sur les PR de la
+pile ; premier CD réel au merge de #15 dans `main` — 6 jobs verts (CI rejouée
+en garde-fou, 3 images, doc, Pages) ; images `ghcr.io/os974/horragor3-*`
+publiées en `latest` + `sha-f73aff2` et **publiques** (téléchargeables sans
+compte, visibilité héritée du dépôt) ; doc en ligne sur
+https://os974.github.io/HorRAGor3/ (Pages activé en mode « GitHub Actions »).
+
+⚠️ **Comportement déviant** (#19) : la branche de base n'ayant pas été
+supprimée après le merge de #15, GitHub a recibé les PR empilées #16 à #18
+sur `ci/cd-ghcr-pages` au lieu de `main` — `main` et la doc publiée ont
+manqué les trois derniers commits. Rattrapé par une PR dédiée vers `main`.
+Leçon : dans une pile de PR, supprimer la branche de base après **chaque**
+merge (ou activer « Automatically delete head branches »).
 
 ---
 
@@ -762,6 +774,13 @@ correctif : quota Supabase (ch. 6), Traefik API 1.44 et 504 (ch. 8), port
 ClickHouse et méta-paquet `langchain` (ch. 4), Langfuse muet (ch. 11),
 Mermaid/Sphinx (ch. 12), revue de sécurité (ch. 10), CD sans garde-fou
 (ch. 13), Ollama injoignable depuis le cluster (ch. 9, résolu au ch. 16).
+
+**Archivé** (2026-10-19) : tickets #1 à #10 sur
+https://github.com/os974/HorRAGor3/issues, labellisés par nature
+(`anomalie`, `comportement-déviant`, `sécurité`) et par couche (`données`,
+`intelligence`, `cluster`, `observabilité`, `ci-cd`), chacun clos avec la
+référence de son correctif. Puis #19, ouvert au premier passage du CD
+(chapitre 13) et clos par la PR qui le corrige.
 
 ---
 
@@ -827,8 +846,8 @@ TLS → JWT → api-ia → API Données → Postgres, + TMDB et web) :
   des outils (`lookup_movie`, `web_search`, `wikipedia_synopsis`) ;
 - Prometheus : `/chat` 2 × `2xx` ; **10 sondes Uptime Kuma UP**.
 
-### Ce qui reste
-Les tickets GitHub Issues à créer (chapitre 14), les merges de la pile de
-branches et l'activation de GitHub Pages (premier passage du CD).
+### Et ensuite
+Tickets archivés (chapitre 14), pile de PR mergée dans `main`, images sur
+GHCR et documentation en ligne (chapitre 13) : l'épilogue du brief est livré.
 
 *Fin de la Phase G — l'épilogue MLOps du brief.*

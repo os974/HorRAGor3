@@ -81,6 +81,8 @@ Au premier lancement, créer les sondes Uptime Kuma :
 
 ## Documentation (Sphinx)
 
+En ligne (publiée par le CD à chaque merge sur `main`) : https://os974.github.io/HorRAGor3/
+
 ```bash
 uv run --group docs sphinx-build -W -b html docs/sphinx docs/sphinx/_build/html
 ```
@@ -111,13 +113,13 @@ CI/CD GitHub Actions :
 - [x] Phase D — API FastAPI (/health, /metrics, /chat) + front Streamlit (parcours des agents)
 - [x] Phase E — Monitoring Langfuse (self-hosted Docker, CallbackHandler v3 fail-open, traces par session)
 - [x] Phase F — Tests (83 tests hermétiques, 92 % de couverture) + CI GitHub Actions
-- [ ] Phase G — Épilogue MLOps
+- [x] Phase G — Épilogue MLOps
   - [x] G1 — API Données dédiée (la base encapsulée, réseau privé)
   - [x] G2 — Authentification par Refresh Tokens (JWT access/refresh, révocation sur rejeu)
   - [x] G3 — Cluster Docker 3 couches (Traefik + TLS vérifié, réseaux internes, durcissement)
   - [x] BDD conteneurisée (Postgres + pgvector dans le cluster, rôle en lecture seule)
   - [x] Monitoring 360° (Langfuse intégré, Prometheus, Grafana, Uptime Kuma)
   - [x] Documentation Sphinx (2 API, schémas relationnels, carte du graphe)
-  - [x] CI/CD (workflows en place ; premier passage au merge sur `main`)
-  - [ ] GitHub Issues (formulaires en place ; tickets à créer)
+  - [x] CI/CD (images publiques sur GHCR, doc en ligne : https://os974.github.io/HorRAGor3/)
+  - [x] GitHub Issues (formulaires + un ticket archivé par anomalie : https://github.com/os974/HorRAGor3/issues)
   - [x] Récit de bout en bout en conteneurs (relais Ollama, traces dans le Langfuse intégré)
