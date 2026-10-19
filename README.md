@@ -56,8 +56,19 @@ Puis ouvre **https://horragor.localhost** (accepte le certificat de la CA locale
 ou importe `certs/ca.pem` dans le navigateur) et connecte-toi avec
 `APP_USERNAME`/`APP_PASSWORD` du `.env`. Architecture : Traefik (443, seul port
 publié) → Streamlit → API IA (JWT) → réseau privé étanche → API Données →
-Postgres + pgvector (conteneur, réseau interne dédié). Ollama et Langfuse restent
-sur l'hôte.
+Postgres + pgvector (conteneur, réseau interne dédié). Ollama reste sur l'hôte.
+
+Monitoring 360° (interfaces sur la boucle locale uniquement) :
+
+| Outil | URL | Rôle |
+|---|---|---|
+| Langfuse | http://localhost:3000 | traces de l'agent (nœuds, tokens, latences, outils) |
+| Uptime Kuma | http://localhost:3001 | disponibilité des 3 couches et des outils |
+| Grafana | http://localhost:3002 | dashboard « HorRAGor3 — les 3 couches » |
+| Prometheus | http://localhost:9090 | métriques brutes (APIs + Traefik) |
+
+Au premier lancement, créer les sondes Uptime Kuma :
+`uv run --with uptime-kuma-api==1.2.1 python scripts/setup_uptime_kuma.py`.
 
 ## Tests
 
