@@ -1,6 +1,7 @@
 """API Données : la base encapsulée derrière sa propre API dédiée (brief, couche 1).
 
-Rôle dans le cluster : SEUL composant à connaître ``DATABASE_URL`` (Supabase).
+Rôle dans le cluster : SEUL composant applicatif à connaître ``DATABASE_URL``
+(le conteneur ``db``, avec un rôle en lecture seule ; Supabase en dev).
 Conteneurisée dans le réseau privé Docker étanche — aucun port publié, aucune
 requête entrante depuis l'extérieur : seule l'API IA lui parle, via
 :class:`~src.data.http_repository.HttpFilmRepository`.
