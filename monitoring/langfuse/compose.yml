@@ -2,7 +2,8 @@
 # Docker unifiant Prometheus, Grafana, Uptime Kuma et Langfuse »). Inclus par
 # le docker-compose.yml racine (include:).
 #
-# Adapté du compose officiel Langfuse v3 : versions épinglées, secrets venus du
+# Adapté du compose officiel Langfuse v3 : versions épinglées (sauf MinIO :
+# Chainguard ne publie que :latest en accès libre), secrets venus du
 # .env, AUCUN port publié hors de l'UI (127.0.0.1:3000), télémétrie coupée et
 # initialisation headless (LANGFUSE_INIT_*) — l'organisation, le projet, ses
 # clés et le compte admin sont provisionnés as code, sans clic dans l'UI.
