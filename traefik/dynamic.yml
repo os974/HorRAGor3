@@ -1,0 +1,6 @@
+# Configuration dynamique Traefik : le certificat TLS du cluster
+# (généré par scripts/gen_certs.sh, signé par la CA locale montée dans le front).
+tls:
+  certificates:
+    - certFile: /certs/cluster.pem
+      keyFile: /certs/cluster.key
