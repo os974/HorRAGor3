@@ -1,5 +1,8 @@
 """GraphEngine : contrat AgentEngine, robustesse jamais-de-500, sources."""
 
+import sys
+import types
+
 import pytest
 from langgraph.errors import GraphRecursionError
 
@@ -76,6 +79,35 @@ def test_sources_derivees_de_la_trace():
 
 def test_langfuse_desactive_sans_cles():
     """Fail-open : pas de clés → pas de callbacks, l'app vit sa vie."""
+    assert _langfuse_callbacks() == ()
+
+
+def _with_keys(monkeypatch):
+    """Clés Langfuse renseignées (le monitoring est censé s'activer)."""
+    monkeypatch.setattr(settings, "langfuse_public_key", "pk-lf-test")
+    monkeypatch.setattr(settings, "langfuse_secret_key", "sk-lf-test")
+
+
+def test_langfuse_active_avec_cles(monkeypatch):
+    """Clés présentes → le client est initialisé et le handler branché."""
+    _with_keys(monkeypatch)
+    clients = []
+    fake_sdk = types.ModuleType("langfuse")
+    fake_sdk.Langfuse = lambda **kwargs: clients.append(kwargs)
+    fake_integration = types.ModuleType("langfuse.langchain")
+    fake_integration.CallbackHandler = lambda: "handler"
+    monkeypatch.setitem(sys.modules, "langfuse", fake_sdk)
+    monkeypatch.setitem(sys.modules, "langfuse.langchain", fake_integration)
+
+    assert _langfuse_callbacks() == ("handler",)
+    assert clients[0]["public_key"] == "pk-lf-test"
+
+
+def test_langfuse_fail_open_si_le_sdk_plante(monkeypatch):
+    """Clés présentes mais SDK inutilisable → aucun callback, jamais d'erreur."""
+    _with_keys(monkeypatch)
+    monkeypatch.setitem(sys.modules, "langfuse", None)  # import → ImportError
+
     assert _langfuse_callbacks() == ()
 
 
