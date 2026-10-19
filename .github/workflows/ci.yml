@@ -30,5 +30,7 @@ jobs:
       - name: Format (ruff)
         run: uv run ruff format --check .
 
+      # `--cov` sans argument : le périmètre vient de [tool.coverage.run] du
+      # pyproject (les deux API + l'UI, comme l'exige le brief).
       - name: Tests + couverture ≥ 80 % (pytest)
-        run: uv run pytest --cov=src -q
+        run: uv run pytest --cov -q

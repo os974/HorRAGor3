@@ -98,6 +98,13 @@ Agent ReAct LangGraph (déjà `langgraph>=1.2.4` !) avec nœud Juge anti-halluci
 2. **Scraper web** : Wikipédia (existant) **+ DuckDuckGo via la lib `ddgs`** (gratuit, sans clé — cohérent avec le 100 % local)
 3. Gestion **uv**, Python 3.12+, mêmes modèles Ollama (`qwen2.5:7b`, `nomic-embed-text`)
 
+### Décisions Phase G (2026-10-19, après relecture intégrale du brief)
+
+4. **Base de données conteneurisée** : Postgres + pgvector dans le réseau privé `data_net`, alimenté par un dump de Supabase. Le brief exige que « l'ensemble » (BDD + API dédiée) soit conteneurisé et parle d'« infrastructure souveraine » ; Supabase ne sert plus qu'en mode dev hors cluster. Remplace la décision G1 « Supabase encapsulé sans migration ».
+5. **Langfuse intégré à la stack Docker du projet** (« stack Docker unifiant Prometheus, Grafana, Uptime Kuma et Langfuse ») ; **Ollama reste sur l'hôte** (GPU, poids des modèles) — écart documenté.
+6. **CD** : build + push des 3 images sur GHCR et publication de la doc Sphinx sur GitHub Pages à chaque merge sur `main`.
+7. **Auth** : le brief dit « Refresh Tokens » ; l'implémentation retenue est un couple de JWT access/refresh (choix d'implémentation, pas une exigence textuelle).
+
 ## Règle de travail — docstrings Google style (prévision Sphinx)
 
 Tous les fichiers Python sont documentés **au fil de l'eau** par docstrings **Google style** (`Args:` / `Returns:` / `Raises:`) : docstring de module en tête de fichier (rôle dans l'architecture) + docstring sur chaque fonction/classe publique, y compris nœuds, routeurs et outils du graphe. Côté Sphinx (Phase G) : `sphinx.ext.autodoc` + `sphinx.ext.napoleon` dans `conf.py`. Documenter dès l'écriture rend la doc Sphinx de l'épilogue quasi gratuite.
@@ -136,7 +143,7 @@ Sauvegarder ce plan dans la mémoire persistante (`~/.claude/projects/-home-oliv
 - `horragor-ecosysteme.md` (type `project`) : cartographie HorRAGor1/2/MultiAgent et chemins des briques réutilisables
 - Mettre à jour `MEMORY.md` avec les pointeurs
 
-> **État d'avancement** — ✅ A (commit `8978270`) · ✅ B (`958a042`) · ✅ C (`89f6adb`) · ✅ D (`9da4371`) · ✅ E (`6d98050`, Langfuse + routage sensible au type de question) · ✅ F (`abd56b1`, 83 tests, 92 %, CI) · G à venir.
+> **État d'avancement** — ✅ A (commit `8978270`) · ✅ B (`958a042`) · ✅ C (`89f6adb`) · ✅ D (`9da4371`) · ✅ E (`6d98050`, Langfuse + routage sensible au type de question) · ✅ F (`abd56b1`, 83 tests, 92 %, CI) · G en cours : ✅ G1 API Données (`4c91601`) · ✅ G2 Refresh Tokens JWT (`5299243`) · 🔧 G3 cluster Docker + TLS (branche `feat/g3-cluster-docker`) · ⏳ BDD conteneurisée · ⏳ monitoring · ⏳ Sphinx · ⏳ CD · ⏳ Issues.
 > (Hashs réécrits le 2026-07-10 avant le premier push : correction de l'email d'auteur → `olivier.schollaert@live.be`.)
 > Réalisations notables : E2E validé sur les deux chemins avec qwen2.5:7b (18 s / 26 s) ; jugement de récolte déterministe (marqueur `"found"`) ; un canal de messages par agent (context trimming) ; API `/health` + `/metrics` + `/chat` et front Streamlit vérifiés en réel sur Supabase (TMDB + pgvector).
 
@@ -173,9 +180,11 @@ Sauvegarder ce plan dans la mémoire persistante (`~/.claude/projects/-home-oliv
 
 ### Phase G — Épilogue MLOps (Grand Final, gros chantier séparé)
 19. **API Données dédiée** (nouvelle — n'existe pas dans HorRAGor1) : petite FastAPI CRUD lecture devant la BDD, conteneurisée, réseau privé Docker uniquement
-20. **Conteneurisation 3 couches** : `docker-compose.yml` avec réseau privé étanche (BDD + API données), API IA (seul port exposé, **auth JWT access + refresh tokens**), Streamlit isolé (HTTPS vers l'API IA)
-21. **Observabilité** : Loguru bout en bout, Prometheus + Grafana + Uptime Kuma (télémétrie des 3 composants), Langfuse (agents)
-22. **Gouvernance** : doc Sphinx (autodoc des 2 API, schéma relationnel — reprendre docs/merise de HorRAGor1 —, cartographie du graphe via l'export Mermaid), GitHub Issues pour chaque anomalie
+20. **Conteneurisation 3 couches** : `docker-compose.yml` avec réseau privé étanche (BDD + API données), API IA (**auth JWT access + refresh tokens**), Streamlit isolé (HTTPS vers l'API IA) ; Traefik en frontal, 443 seul port ouvert vers l'extérieur
+21. **BDD dans le cluster** (décision 4) : service Postgres + pgvector sur `data_net` sans port publié, alimenté par `pg_dump` de Supabase ; index HNSW recréé localement ; l'API Données perd toute sortie réseau
+22. **Observabilité** : Loguru bout en bout, Prometheus + Grafana (provisioning as code) + Uptime Kuma (télémétrie des 3 composants, l'UI via les métriques Traefik), Langfuse intégré au compose (init headless `LANGFUSE_INIT_*`) ; UIs d'admin liées à 127.0.0.1 selon le plan de ports
+23. **Gouvernance** : doc Sphinx (autodoc des 2 API, schéma relationnel — reprendre docs/merise de HorRAGor1 —, cartographie du graphe via l'export Mermaid), GitHub Issues pour chaque anomalie (y compris celles déjà rencontrées et documentées dans le lifecycle)
+24. **CD** (décision 6) : workflow GitHub Actions sur `main` → images GHCR + doc Sphinx sur GitHub Pages
 
 ## Vérification
 

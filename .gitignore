@@ -13,3 +13,4 @@ htmlcov/
 # Artefacts locaux volumineux ou régénérables
 data/faiss_index/
 logs/
+certs/
