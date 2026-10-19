@@ -74,6 +74,13 @@ class TitleIndex:
     MAP_FILE = "titles_map.json"
 
     def __init__(self, index: faiss.Index, ids: list[int], titles: list[str]):
+        """Assemble un index déjà construit et son mapping.
+
+        Args:
+            index: L'index FAISS (vecteurs normalisés, dans l'ordre d'ajout).
+            ids: Identifiants base, alignés sur les positions de l'index.
+            titles: Titres originaux, alignés sur les positions de l'index.
+        """
         self.index = index
         self.ids = ids
         self.titles = titles
@@ -136,6 +143,11 @@ class TitleIndex:
         return results
 
     def __len__(self) -> int:
+        """Nombre de titres indexés.
+
+        Returns:
+            Le nombre de vecteurs présents dans l'index FAISS.
+        """
         return self.index.ntotal
 
     # --- Persistance ----------------------------------------------------------

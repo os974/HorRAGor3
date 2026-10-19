@@ -5,7 +5,7 @@ from datetime import date
 import pytest
 from sqlalchemy import create_engine, text
 
-from src.data.repository import SupabaseFilmRepository, _pick_rating, _year_from
+from src.data.repository import SqlFilmRepository, _pick_rating, _year_from
 
 
 @pytest.fixture
@@ -33,7 +33,8 @@ def repository():
                 "(41, 'rotten_tomatoes', 89.0)"
             )
         )
-    return SupabaseFilmRepository(engine=engine)
+    yield SqlFilmRepository(engine=engine)
+    engine.dispose()  # ferme la connexion SQLite (pas de ResourceWarning)
 
 
 def test_get_metadata_assemble_le_lore(repository):
@@ -49,12 +50,6 @@ def test_get_metadata_assemble_le_lore(repository):
 def test_get_metadata_film_inconnu(repository):
     """Id absent → None, sans exception."""
     assert repository.get_metadata(999) is None
-
-
-def test_validate_film_est_le_role_de_faiss(repository):
-    """La validation floue n'appartient pas au SQL."""
-    with pytest.raises(NotImplementedError):
-        repository.validate_film("Hereditary")
 
 
 def test_year_from_tolere_les_formats():

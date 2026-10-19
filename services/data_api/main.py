@@ -25,7 +25,7 @@ from prometheus_fastapi_instrumentator import Instrumentator
 
 from src.contracts.interfaces import FilmRepository
 from src.contracts.schemas import FilmMetadata, FilmRef
-from src.data.repository import SupabaseFilmRepository
+from src.data.repository import SqlFilmRepository
 from src.logging_conf import setup_logging
 
 # Un seul flux de logs Loguru, comme partout (règle : journalisation bout en bout).
@@ -33,13 +33,13 @@ setup_logging()
 
 
 @lru_cache(maxsize=1)
-def _repository() -> SupabaseFilmRepository:
+def _repository() -> SqlFilmRepository:
     """Construit le repository une seule fois (connexion paresseuse).
 
     Returns:
         Le repository singleton branché sur ``DATABASE_URL``.
     """
-    return SupabaseFilmRepository()
+    return SqlFilmRepository()
 
 
 def get_repository() -> FilmRepository:

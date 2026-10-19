@@ -69,12 +69,6 @@ def test_erreur_serveur_remonte(monkeypatch):
     assert rag_tool.query_movie_metadata(41) is None
 
 
-def test_validate_film_reste_le_role_de_faiss():
-    """La validation floue n'est pas du ressort de l'API Données."""
-    with pytest.raises(NotImplementedError):
-        HttpFilmRepository(base_url="http://x").validate_film("Alien")
-
-
 def test_rag_tool_choisit_le_repo_selon_la_config(monkeypatch):
     """data_api_url définie → client HTTP ; vide → accès direct Supabase."""
     monkeypatch.setattr(settings, "data_api_url", "http://api-donnees:8100")

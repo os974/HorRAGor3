@@ -56,7 +56,7 @@ def _pick_rating(rows: list[tuple[str, float | None]]) -> float | None:
     return None
 
 
-class SupabaseFilmRepository:
+class SqlFilmRepository:
     """Implémentation SQL de :class:`~src.contracts.interfaces.FilmRepository`."""
 
     def __init__(self, engine: Engine | None = None):
@@ -120,18 +120,6 @@ class SupabaseFilmRepository:
             rating=rating,
             synopsis=movie.overview,
         )
-
-    def validate_film(self, title: str) -> FilmRef | None:
-        """Non implémenté ici : la validation floue est le rôle de FAISS.
-
-        Args:
-            title: Titre à valider.
-
-        Raises:
-            NotImplementedError: Toujours — utiliser
-                :func:`src.tools.rag_tool.validate_film`.
-        """
-        raise NotImplementedError("Utiliser src.tools.rag_tool.validate_film.")
 
     def recommend_similar(self, film_id: int, k: int = 5) -> list[FilmRef]:
         """Renvoie les k films les plus proches par similarité cosinus (pgvector).

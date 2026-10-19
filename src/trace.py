@@ -48,7 +48,9 @@ def record(kind: str, name: str, detail: str = "") -> None:
     savoir si une trace est active.
 
     Args:
-        kind: Type d'étape — "node" | "tool" | "router" | "verdict".
+        kind: Type d'étape — "node" | "router" pour le graphe, ou la source
+            interrogée : "embed" | "faiss" | "sql" | "pgvector" | "tmdb" |
+            "wikipedia" | "ddg".
         name: Nom du nœud, de l'outil ou de l'événement.
         detail: Contexte libre, tronqué à 300 caractères.
     """

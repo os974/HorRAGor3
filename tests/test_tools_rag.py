@@ -33,9 +33,6 @@ class FakeRepository:
             raise self._error
         return self._similar
 
-    def validate_film(self, title):
-        raise NotImplementedError
-
 
 def _use_index(monkeypatch, results):
     """Installe un faux index + un faux embedding (pas d'Ollama)."""

@@ -345,7 +345,7 @@ directement par la couche IA.
   film inconnu ; **503** propre si la base est injoignable (jamais de 500 brut).
 - **Ce qui s'y passe** : c'est désormais le SEUL composant à connaître
   `DATABASE_URL` (Supabase encapsulé à ce stade ; décision révisée au
-  chapitre 9 : la base elle-même rejoint le cluster). Réutilise `SupabaseFilmRepository` tel quel,
+  chapitre 9 : la base elle-même rejoint le cluster). Réutilise `SqlFilmRepository` tel quel,
   Loguru, Instrumentator, repository injectable pour les tests. En cluster
   (G3), ce service n'aura **aucun port publié**.
 
@@ -505,7 +505,7 @@ api-ia ──data_net (internal)──> api-donnees ──db_net (internal)─�
 - Healthcheck `pg_isready -h 127.0.0.1` : pendant la restauration, le serveur
   temporaire n'écoute que sur le socket Unix, donc « healthy » seulement une
   fois la base prête ; `api-donnees` attend cette condition (`depends_on`).
-- Le code applicatif n'a pas changé d'une ligne : `SupabaseFilmRepository`
+- Le code applicatif n'a pas changé d'une ligne : `SqlFilmRepository`
   parle du SQL standard et `<=>` (pgvector) — seul `DATABASE_URL` diffère.
 
 **Vu en réel** (2026-10-19) : dump en 40 s ; restauration + index HNSW en 35 s
