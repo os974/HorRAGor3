@@ -16,7 +16,7 @@ from src.engine import get_engine
 class FakeEngine:
     """Moteur factice : la route /chat répond sans graphe ni LLM."""
 
-    async def run(self, req: ChatRequest) -> ChatResponse:
+    async def run(self, req: ChatRequest, user: str = "anonyme") -> ChatResponse:
         return ChatResponse(answer="bouh")
 
 

@@ -1,6 +1,6 @@
 """Les trois nœuds avec un LLM factice : comportement sans Ollama."""
 
-from langchain_core.messages import AIMessage, ToolMessage
+from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 
 from src.graph import nodes
 
@@ -104,3 +104,43 @@ def test_narration_node_ne_voit_que_le_dossier(monkeypatch):
     dossier = fake.last_messages[1].content
     assert "Alien" in dossier and "trouvaille web" in dossier
     assert len(fake.last_messages) == 2  # system + dossier, rien d'autre
+
+
+HISTORY = [
+    HumanMessage(content="Parle-moi du film Hereditary"),
+    AIMessage(content="Dans l'ombre des bois, Hereditary " + "x" * 600),
+]
+
+
+def test_rag_node_lit_les_echanges_precedents(monkeypatch):
+    """Une relance : le Chercheur reçoit le résumé des échanges, réponses tronquées."""
+    fake = FakeLLM(AIMessage(content="rien"))
+    monkeypatch.setattr(nodes, "_worker_llm", lambda: fake)
+
+    nodes.rag_node({"question": "Et son réalisateur ?", "history": HISTORY})
+
+    prompt = fake.last_messages[1].content
+    assert "Parle-moi du film Hereditary" in prompt
+    assert prompt.endswith("Question actuelle : Et son réalisateur ?")
+    assert "x" * 400 not in prompt  # la réponse précédente est tronquée
+
+
+def test_scraper_node_recoit_aussi_le_resume(monkeypatch):
+    """L'Enquêteur voit les échanges précédents dans son brief."""
+    fake = FakeLLM(AIMessage(content="enquête close"))
+    monkeypatch.setattr(nodes, "_worker_llm", lambda: fake)
+
+    nodes.scraper_node({"question": "Et ses anecdotes ?", "history": HISTORY})
+
+    assert "Parle-moi du film Hereditary" in fake.last_messages[1].content
+
+
+def test_narration_node_consigne_l_echange(monkeypatch):
+    """La plume reste isolée de la mémoire mais y consigne l'échange du tour."""
+    fake = FakeLLM(AIMessage(content="Il était une nuit..."))
+    monkeypatch.setattr(nodes, "_writer_llm", lambda: fake)
+
+    out = nodes.narration_node({"question": "Parle-moi d'Alien", "history": HISTORY})
+
+    assert [m.content for m in out["history"]] == ["Parle-moi d'Alien", "Il était une nuit..."]
+    assert "Hereditary" not in fake.last_messages[1].content  # aucun historique transmis

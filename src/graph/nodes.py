@@ -22,7 +22,13 @@ uniquement le dossier factuel (``lore`` + ``web_findings``).
 
 import json
 
-from langchain_core.messages import BaseMessage, HumanMessage, SystemMessage, ToolMessage
+from langchain_core.messages import (
+    AIMessage,
+    BaseMessage,
+    HumanMessage,
+    SystemMessage,
+    ToolMessage,
+)
 from langchain_ollama import ChatOllama
 
 from src import trace
@@ -42,7 +48,9 @@ Règles strictes :
    (il corrige les approximations et renvoie le dossier complet).
 2. Si l'utilisateur veut des recommandations ou des films semblables, utilise find_similar.
 3. N'invente JAMAIS rien : seules les données renvoyées par tes outils comptent.
-4. Quand ta fouille est terminée, réponds par UNE phrase factuelle résumant ce que
+4. Si la question renvoie à un échange précédent (« il », « ce film », « et son
+   réalisateur ? »), identifie le film grâce aux échanges précédents fournis.
+5. Quand ta fouille est terminée, réponds par UNE phrase factuelle résumant ce que
    tu as trouvé ou pas trouvé. Pas de style, pas de narration : tu es un chercheur."""
 
 SCRAPER_PROMPT = """Tu es l'Enquêteur du Web de HorRAGor, détective spécialisé en films d'horreur.
@@ -74,12 +82,17 @@ Règles strictes :
 
 # Brief reformulé pour l'Enquêteur (anti-collision de tokens : il reçoit une
 # mission claire, pas l'historique du Chercheur).
-_SCRAPER_BRIEF = """Question du visiteur : {question}
+_SCRAPER_BRIEF = """{recap}Question du visiteur : {question}
 
 Ce que la base locale a déjà donné (peut être vide) :
 {lore}
 
 Trouve sur le web ce qui manque pour bien répondre."""
+
+# Les échanges précédents tels que les agents de fouille les lisent : un
+# résumé court (réponses tronquées), jamais l'historique brut des outils.
+_RECAP_ANSWER_CHARS = 300
+
 
 _NARRATION_DOSSIER = """Question du visiteur : {question}
 
@@ -141,6 +154,32 @@ def harvest_facts(messages: list[BaseMessage]) -> list[str]:
     ]
 
 
+def _history_recap(state: AgentState) -> str:
+    """Résume les échanges précédents de la conversation pour les agents de fouille.
+
+    Les réponses sont tronquées : de quoi savoir de quel film on parle, sans
+    réinjecter des récits entiers (context trimming).
+
+    Args:
+        state: L'état courant (``history`` éventuel).
+
+    Returns:
+        Le bloc « Échanges précédents… » suivi d'une ligne vide, ou une chaîne
+        vide en début de conversation.
+    """
+    history = state.get("history") or []
+    if not history:
+        return ""
+    lines = []
+    for message in history:
+        text = " ".join(str(message.content).split())
+        if isinstance(message, HumanMessage):
+            lines.append(f"- Visiteur : {text}")
+        else:
+            lines.append(f"  Réponse : {text[:_RECAP_ANSWER_CHARS]}")
+    return "Échanges précédents de cette conversation :\n" + "\n".join(lines) + "\n\n"
+
+
 def _first_visit(state: AgentState, node: str) -> bool:
     """Indique si un nœud est traversé pour la première fois de ce run.
 
@@ -179,7 +218,9 @@ def rag_node(state: AgentState) -> dict:
     history = list(state.get("rag_messages") or [])
     first_call = not history
     if first_call:
-        history = [SystemMessage(RAG_PROMPT), HumanMessage(state["question"])]
+        recap = _history_recap(state)
+        question = f"{recap}Question actuelle : {state['question']}" if recap else state["question"]
+        history = [SystemMessage(RAG_PROMPT), HumanMessage(question)]
         trace.record("node", "rag", f"fouille locale : {state['question'][:80]!r}")
     response = llm.invoke(history)
 
@@ -213,7 +254,9 @@ def scraper_node(state: AgentState) -> dict:
     first_call = not history
     if first_call:
         brief = _SCRAPER_BRIEF.format(
-            question=state["question"], lore=state.get("lore") or "(rien)"
+            recap=_history_recap(state),
+            question=state["question"],
+            lore=state.get("lore") or "(rien)",
         )
         history = [SystemMessage(SCRAPER_PROMPT), HumanMessage(brief)]
         trace.record("node", "scraper", "enquête web déclenchée")
@@ -236,12 +279,14 @@ def narration_node(state: AgentState) -> dict:
 
     Isolé de toute la plomberie (context trimming du brief) : PAS d'outils,
     PAS d'historique — uniquement le dossier factuel. Température créative.
+    Dernier nœud du tour, il consigne l'échange dans la mémoire de session.
 
     Args:
         state: L'état courant (``question``, ``lore``, ``web_findings``).
 
     Returns:
-        Les modifications : ``story`` et ``path``.
+        Les modifications : ``story``, ``path`` et l'échange du tour pour
+        ``history`` (question du visiteur, récit rendu).
     """
     dossier = _NARRATION_DOSSIER.format(
         question=state["question"],
@@ -250,7 +295,12 @@ def narration_node(state: AgentState) -> dict:
     )
     trace.record("node", "narration", f"dossier de {len(dossier)} car. transmis à la plume")
     response = _writer_llm().invoke([SystemMessage(NARRATION_PROMPT), HumanMessage(dossier)])
-    return {"story": str(response.content), "path": ["narration"]}
+    story = str(response.content)
+    return {
+        "story": story,
+        "path": ["narration"],
+        "history": [HumanMessage(state["question"]), AIMessage(story)],
+    }
 
 
 def _pretty_facts(raw: str | None) -> str:

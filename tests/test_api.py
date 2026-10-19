@@ -13,7 +13,7 @@ from src.engine import get_engine
 class FakeEngine:
     """Double d'AgentEngine : réponse fixe, instantanée."""
 
-    async def run(self, req: ChatRequest) -> ChatResponse:
+    async def run(self, req: ChatRequest, user: str = "anonyme") -> ChatResponse:
         return ChatResponse(
             answer=f"BOUH:{req.message}",
             path=["rag", "narration"],

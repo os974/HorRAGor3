@@ -8,18 +8,62 @@ le dossier synthétique (``lore`` + ``web_findings``). Bénéfices : pas de
 collision de tokens entre agents, pas de paresse de génération, et un Écrivain
 Gothique jamais noyé dans les logs techniques.
 
+Mémoire de session : le graphe est compilé avec un checkpointer, et chaque
+conversation (``thread_id`` = compte utilisateur + ``session_id``) retrouve
+son State d'un tour à l'autre. Seul ``history`` est fait pour durer : à chaque
+nouvelle question, le moteur remet à zéro les canaux des agents et les cases
+du dossier, pour que le context trimming tienne sur toute la conversation.
+
 Reducers :
     - ``add_messages`` : les nouveaux messages s'AJOUTENT (micro-boucle outil) ;
-    - ``operator.add`` sur ``path`` : chaque nœud traversé s'enregistre.
+      ``RemoveMessage(id=REMOVE_ALL_MESSAGES)`` vide le canal en début de tour ;
+    - :func:`extend_path` sur ``path`` : chaque nœud traversé s'enregistre, une
+      liste vide ouvre un nouveau tour ;
+    - :func:`keep_recent_exchanges` sur ``history`` : la fenêtre glissante des
+      derniers échanges de la conversation.
 
 Les autres clés sont écrasées à chaque écriture (comportement par défaut) :
-ce sont des « cases » du dossier que chaque agent remplit une fois.
+ce sont des « cases » du dossier que chaque agent remplit une fois par tour.
 """
 
-import operator
 from typing import Annotated, TypedDict
 
+from langchain_core.messages import BaseMessage
 from langgraph.graph.message import add_messages
+
+# Échanges (question + réponse) gardés en mémoire par conversation : assez pour
+# comprendre une relance (« et son réalisateur ? »), trop peu pour saturer.
+MEMORY_EXCHANGES = 3
+
+
+def extend_path(left: list[str] | None, right: list[str] | None) -> list[str]:
+    """Reducer de ``path`` : ajoute les nœuds traversés, une liste vide remet à zéro.
+
+    Args:
+        left: Le parcours déjà enregistré.
+        right: Les nœuds à ajouter, ou ``[]`` pour ouvrir un nouveau tour.
+
+    Returns:
+        Le parcours mis à jour.
+    """
+    if not right:
+        return []
+    return [*(left or []), *right]
+
+
+def keep_recent_exchanges(
+    left: list[BaseMessage] | None, right: list[BaseMessage] | None
+) -> list[BaseMessage]:
+    """Reducer de ``history`` : ajoute l'échange du tour, garde les plus récents.
+
+    Args:
+        left: L'historique déjà mémorisé.
+        right: Les messages du tour (question du visiteur, puis récit).
+
+    Returns:
+        Les ``MEMORY_EXCHANGES`` derniers échanges (deux messages chacun).
+    """
+    return [*(left or []), *(right or [])][-2 * MEMORY_EXCHANGES :]
 
 
 class AgentState(TypedDict, total=False):
@@ -37,8 +81,11 @@ class AgentState(TypedDict, total=False):
             cf. ``router.wants_web_details``) → l'Enquêteur du Web part.
         web_findings: Synthèse factuelle de l'enquête web (Scraper).
         story: La réponse finale de l'Écrivain Gothique.
-        path: Nœuds traversés dans l'ordre (ex. ["rag", "scraper",
-            "narration"]) — renvoyé au Front via ``ChatResponse.path``.
+        path: Nœuds traversés dans l'ordre pendant le tour (ex. ["rag",
+            "scraper", "narration"]) — renvoyé au Front via ``ChatResponse.path``.
+        history: Mémoire de la conversation : les derniers échanges (question
+            du visiteur, récit rendu), conservés d'un tour à l'autre et lus
+            par le Chercheur et l'Enquêteur pour comprendre les relances.
     """
 
     question: str
@@ -47,4 +94,5 @@ class AgentState(TypedDict, total=False):
     lore: str
     web_findings: str
     story: str
-    path: Annotated[list[str], operator.add]
+    path: Annotated[list[str], extend_path]
+    history: Annotated[list[BaseMessage], keep_recent_exchanges]

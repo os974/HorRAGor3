@@ -8,12 +8,18 @@ Robustesse (pattern HorRAGor2) : ``run`` ne lève JAMAIS — récursion excessiv
 ou panne technique → réponse de repli assumée, jamais de 500 pour le Front.
 Le graphe est synchrone : on l'exécute via ``asyncio.to_thread`` pour ne pas
 geler la boucle d'événements FastAPI (le ContextVar de trace se propage).
+
+Mémoire de session : chaque conversation est un ``thread_id`` du checkpointer,
+préfixé par le compte utilisateur — un visiteur ne peut jamais reprendre la
+conversation d'un autre, même en devinant son ``session_id``.
 """
 
 import asyncio
 from functools import lru_cache
 
+from langchain_core.messages import RemoveMessage
 from langgraph.errors import GraphRecursionError
+from langgraph.graph.message import REMOVE_ALL_MESSAGES
 from loguru import logger
 
 from src import trace
@@ -49,11 +55,12 @@ class GraphEngine:
         """
         self._graph = graph or pipeline.app
 
-    async def run(self, req: ChatRequest) -> ChatResponse:
+    async def run(self, req: ChatRequest, user: str = "anonyme") -> ChatResponse:
         """Traite une question de bout en bout (jamais d'exception).
 
         Args:
             req: La requête du Front (message + session_id).
+            user: Le compte authentifié (extrait du jeton par l'API).
 
         Returns:
             La réponse complète : récit, parcours des agents, sources, trace.
@@ -62,8 +69,8 @@ class GraphEngine:
         try:
             result = await asyncio.to_thread(
                 self._graph.invoke,
-                {"question": req.message},
-                self._invoke_config(req),
+                self._turn_input(req.message),
+                self._invoke_config(req, user),
             )
             answer = (result.get("story") or "").strip() or FALLBACK_ANSWER
             response = ChatResponse(
@@ -93,25 +100,58 @@ class GraphEngine:
         return response
 
     @staticmethod
-    def _invoke_config(req: ChatRequest) -> dict:
+    def _turn_input(question: str) -> dict:
+        """Entrée d'un tour : la question, et les cases de travail remises à zéro.
+
+        Avec la mémoire de session, le State d'une conversation persiste d'une
+        question à l'autre : on vide les canaux des agents et le dossier du
+        tour précédent pour que chaque agent reparte d'un contexte propre
+        (context trimming). Seul ``history`` traverse les tours.
+
+        Args:
+            question: La nouvelle question du visiteur.
+
+        Returns:
+            Le dict d'entrée du graphe.
+        """
+        return {
+            "question": question,
+            "rag_messages": [RemoveMessage(id=REMOVE_ALL_MESSAGES)],
+            "scraper_messages": [RemoveMessage(id=REMOVE_ALL_MESSAGES)],
+            "lore": "",
+            "web_findings": "",
+            "story": "",
+            "path": [],
+        }
+
+    @staticmethod
+    def _invoke_config(req: ChatRequest, user: str = "anonyme") -> dict:
         """Construit la config d'invocation du graphe.
 
-        Monitoring Langfuse (Phase E) : si les clés sont configurées, le
-        ``CallbackHandler`` est passé via ``config={"callbacks": [...]}``
-        (le mécanisme exact du brief) et le ``session_id`` de la requête est
-        transmis pour regrouper les traces par conversation dans l'UI.
+        Mémoire de session : ``thread_id`` = compte + ``session_id``. Monitoring
+        Langfuse (Phase E) : si les clés sont configurées, le
+        ``CallbackHandler`` est passé via ``config={"callbacks": [...]}`` (le
+        mécanisme exact du brief), avec la conversation et le compte pour
+        regrouper les traces et mesurer les tokens par utilisateur.
 
         Args:
             req: La requête courante.
+            user: Le compte authentifié.
 
         Returns:
-            La config LangGraph (limite de récursion + callbacks éventuels).
+            La config LangGraph (limite de récursion, conversation, callbacks).
         """
-        config: dict = {"recursion_limit": RECURSION_LIMIT}
+        config: dict = {
+            "recursion_limit": RECURSION_LIMIT,
+            "configurable": {"thread_id": f"{user}:{req.session_id}"},
+        }
         callbacks = _langfuse_callbacks()
         if callbacks:
             config["callbacks"] = list(callbacks)
-            config["metadata"] = {"langfuse_session_id": req.session_id}
+            config["metadata"] = {
+                "langfuse_session_id": req.session_id,
+                "langfuse_user_id": user,
+            }
         return config
 
     @staticmethod

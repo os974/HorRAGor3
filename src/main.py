@@ -104,4 +104,4 @@ async def chat(req: ChatRequest, engine: EngineDep, user: UserDep) -> ChatRespon
     """
     with logger.contextualize(session_id=req.session_id, request_id=uuid4().hex[:8]):
         logger.info("POST /chat [{}] par {} : {!r}", req.session_id, user, req.message[:80])
-        return await engine.run(req)
+        return await engine.run(req, user)
