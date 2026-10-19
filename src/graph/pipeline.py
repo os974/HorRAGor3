@@ -15,15 +15,16 @@ Topologie peer-to-peer (aucun manager central) :
                                            └─→ scraper ⇄ scraper_tools
                                                   └─→ narration → END
 
-Les nœuds et outils sont **injectables** dans :func:`build_graph` (pattern du
-module MultiAgent) : les tests câblent de faux agents et vérifient le routage
-sans appeler le moindre LLM.
+Les nœuds et outils sont **injectables** dans :func:`build_workflow` (pattern
+du module MultiAgent) : les tests câblent de faux agents via
+:func:`build_graph` et vérifient le routage sans appeler le moindre LLM.
 
 Le livrable du brief : ce fichier se termine par ``app = workflow.compile()``,
 l'objet final importé par FastAPI pour propulser le backend.
 """
 
 from langgraph.graph import END, START, StateGraph
+from langgraph.graph.state import CompiledStateGraph
 from langgraph.prebuilt import ToolNode
 
 from src.graph import router
@@ -33,14 +34,14 @@ from src.tools.rag_tool import RAG_TOOLS
 from src.tools.scraper_tool import SCRAPER_TOOLS
 
 
-def build_graph(
+def build_workflow(
     rag=rag_node,
     scraper=scraper_node,
     narration=narration_node,
     rag_tools=None,
     scraper_tools=None,
-):
-    """Assemble et compile le StateGraph multi-agent.
+) -> StateGraph:
+    """Assemble le StateGraph multi-agent (non compilé).
 
     Args:
         rag: Nœud du Chercheur Local (injectable pour les tests).
@@ -52,7 +53,7 @@ def build_graph(
             sur le canal ``scraper_messages``.
 
     Returns:
-        Le graphe compilé, prêt à ``invoke``/``stream``.
+        Le ``StateGraph`` câblé, à compiler par ``workflow.compile()``.
     """
     # Chaque ToolNode lit/écrit le canal de messages de SON agent : l'isolation
     # de contexte est garantie jusque dans l'exécution des outils.
@@ -86,8 +87,21 @@ def build_graph(
         {"scraper_tools": "scraper_tools", "narration": "narration"},
     )
 
-    return workflow.compile()
+    return workflow
+
+
+def build_graph(**nodes) -> CompiledStateGraph:
+    """Assemble et compile un graphe aux nœuds injectés (tests).
+
+    Args:
+        **nodes: Nœuds de remplacement, mêmes noms que :func:`build_workflow`.
+
+    Returns:
+        Le graphe compilé, prêt à ``invoke``/``stream``.
+    """
+    return build_workflow(**nodes).compile()
 
 
 # Le livrable : l'objet final, propre et prêt à l'emploi, importé par FastAPI.
-app = build_graph()
+workflow = build_workflow()
+app = workflow.compile()

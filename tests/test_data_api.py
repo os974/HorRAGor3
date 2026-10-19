@@ -25,9 +25,6 @@ class FakeRepository:
             raise self._error
         return self._similar[:k]
 
-    def validate_film(self, title):
-        raise NotImplementedError
-
 
 @pytest.fixture
 def client():

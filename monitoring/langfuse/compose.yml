@@ -72,6 +72,12 @@ services:
       LANGFUSE_INIT_USER_PASSWORD: ${LANGFUSE_INIT_USER_PASSWORD:?LANGFUSE_INIT_USER_PASSWORD manquant}
     ports:
       - "127.0.0.1:3000:3000"
+    healthcheck:
+      test: wget --quiet --tries=1 --spider http://127.0.0.1:3000/api/public/health || exit 1
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 60s
     networks:
       - langfuse_net
       - langfuse_ingest
@@ -90,6 +96,14 @@ services:
     image: langfuse/langfuse-worker:3.210.0
     environment:
       <<: *langfuse-env
+    healthcheck:
+      # Le worker n'écoute que sur $HOSTNAME (l'id du conteneur) ; « $$ »
+      # empêche Compose d'interpoler la variable côté hôte.
+      test: wget --quiet --tries=1 --spider http://$$HOSTNAME:3030/api/health || exit 1
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 60s
     networks:
       - langfuse_net
     depends_on: *langfuse-deps

@@ -48,7 +48,9 @@ def record(kind: str, name: str, detail: str = "") -> None:
     savoir si une trace est active.
 
     Args:
-        kind: Type d'étape — "node" | "tool" | "router" | "verdict".
+        kind: Type d'étape — "node" | "router" pour le graphe, ou la source
+            interrogée : "embed" | "faiss" | "sql" | "pgvector" | "tmdb" |
+            "wikipedia" | "ddg".
         name: Nom du nœud, de l'outil ou de l'événement.
         detail: Contexte libre, tronqué à 300 caractères.
     """
@@ -57,7 +59,7 @@ def record(kind: str, name: str, detail: str = "") -> None:
         events.append(TraceStep(kind=kind, name=name, detail=str(detail)[:300]))
 
 
-def log_trace(question: str, response: ChatResponse) -> None:
+def log_trace(question: str, response: ChatResponse, session_id: str = "") -> None:
     """Persiste un run complet (1 ligne JSON) dans ``logs/traces.jsonl``.
 
     Best-effort : le logging ne doit jamais casser la réponse (fail-open,
@@ -66,11 +68,13 @@ def log_trace(question: str, response: ChatResponse) -> None:
     Args:
         question: Message utilisateur du run.
         response: Réponse complète renvoyée au Front.
+        session_id: Conversation d'origine (corrélation avec Loguru et Langfuse).
     """
     try:
         _LOG_PATH.parent.mkdir(parents=True, exist_ok=True)
         record_obj = {
             "ts": datetime.now(UTC).isoformat(),
+            "session_id": session_id,
             "question": question,
             "answer": response.answer,
             "path": response.path,

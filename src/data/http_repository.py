@@ -4,7 +4,7 @@ Dans l'architecture cible du brief, l'API IA ne parle JAMAIS à la base :
 elle communique exclusivement, via le réseau privé Docker, avec l'API Données
 (``services/data_api``). Cette classe implémente le Protocol
 :class:`~src.contracts.interfaces.FilmRepository` au-dessus de HTTP — le même
-contrat que :class:`~src.data.repository.SupabaseFilmRepository`, donc
+contrat que :class:`~src.data.repository.SqlFilmRepository`, donc
 interchangeable sans toucher aux outils (``rag_tool`` choisit selon
 ``settings.data_api_url``).
 
@@ -77,15 +77,3 @@ class HttpFilmRepository:
             "pgvector", "recommend_similar", f"id={film_id} → {len(results)} via API Données"
         )
         return results
-
-    def validate_film(self, title: str) -> FilmRef | None:
-        """Non implémenté ici : la validation floue est le rôle de FAISS, local à l'IA.
-
-        Args:
-            title: Titre à valider.
-
-        Raises:
-            NotImplementedError: Toujours — utiliser
-                :func:`src.tools.rag_tool.validate_film`.
-        """
-        raise NotImplementedError("Utiliser src.tools.rag_tool.validate_film.")

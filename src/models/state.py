@@ -31,12 +31,10 @@ class AgentState(TypedDict, total=False):
             tool calls, tool results) — invisible aux autres agents.
         scraper_messages: Micro-conversation de l'Agent Scraper — idem.
         lore: Synthèse factuelle de la récolte locale (contenus bruts des
-            outils FAISS/SQL/pgvector ayant trouvé des données).
-        is_complete: Jugement du nœud RAG sur sa récolte (déterministe :
-            au moins un outil a marqué ``"found": true`` ET la question ne
-            réclame pas d'infos hors du périmètre local — anecdotes,
-            coulisses... cf. ``nodes.wants_web_details``). Lu par le routeur
-            ``should_scrape_or_narrate`` — « le nœud juge, le routeur aiguille ».
+            outils FAISS/SQL/pgvector ayant trouvé des données). Jugée par le
+            routeur ``should_scrape_or_narrate`` : vide, ou question qui
+            réclame des infos hors du périmètre local (anecdotes, coulisses...
+            cf. ``router.wants_web_details``) → l'Enquêteur du Web part.
         web_findings: Synthèse factuelle de l'enquête web (Scraper).
         story: La réponse finale de l'Écrivain Gothique.
         path: Nœuds traversés dans l'ordre (ex. ["rag", "scraper",
@@ -47,7 +45,6 @@ class AgentState(TypedDict, total=False):
     rag_messages: Annotated[list, add_messages]
     scraper_messages: Annotated[list, add_messages]
     lore: str
-    is_complete: bool
     web_findings: str
     story: str
     path: Annotated[list[str], operator.add]

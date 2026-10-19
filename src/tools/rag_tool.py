@@ -3,7 +3,7 @@
 Regroupe les fonctions data de la Partie 2 derrière un contrat unique, pensé
 pour un agent LLM : **aucune fonction publique ne lève jamais d'exception** —
 en cas d'erreur (Ollama éteint, base injoignable...), on renvoie None/[] et on
-journalise. C'est le nœud RAG qui jugera si sa récolte est suffisante ; un
+journalise. C'est le routeur qui jugera si la récolte est suffisante ; un
 outil qui plante ne doit pas faire s'effondrer le graphe.
 
 Trois capacités :
@@ -13,7 +13,9 @@ Trois capacités :
     - :func:`find_similar_horror_movies` — pgvector : recommandations.
 
 Singletons injectables (``set_index`` / ``set_repository``) : l'API injecte
-les vrais au démarrage, les tests injectent des fakes.
+l'index FAISS au démarrage (lifespan) ; le repository est construit au premier
+appel selon ``settings.data_api_url`` (client de l'API Données en cluster, SQL
+direct en dev). Les tests injectent des fakes.
 """
 
 import json
@@ -29,7 +31,7 @@ from src.data import tmdb
 from src.data.embed import embed_text
 from src.data.faiss_index import TitleIndex, normalize_title
 from src.data.http_repository import HttpFilmRepository
-from src.data.repository import SupabaseFilmRepository
+from src.data.repository import SqlFilmRepository
 
 _index: TitleIndex | None = None
 _repository: FilmRepository | None = None
@@ -82,7 +84,7 @@ def _get_repository() -> FilmRepository:
         if settings.data_api_url:
             _repository = HttpFilmRepository()
         else:
-            _repository = SupabaseFilmRepository()
+            _repository = SqlFilmRepository()
     return _repository
 
 
@@ -187,7 +189,7 @@ def find_similar_horror_movies(film_id: int, k: int = 5) -> list[FilmRef]:
 # interne validate → id → requête, pour épargner au petit modèle la gestion
 # des identifiants. Les docstrings ci-dessous sont les descriptions lues par
 # le LLM pour choisir son outil. Retour = JSON compact avec un champ "found" :
-# c'est ce marqueur que le nœud RAG scrute pour juger sa récolte (déterministe).
+# c'est ce marqueur que le nœud RAG récolte et que le routeur juge (déterministe).
 
 
 @tool

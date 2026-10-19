@@ -13,20 +13,20 @@ HorRAGor3 sans ouvrir le code.
 Utilisateur (navigateur)
    │ question en français
    ▼
-app_frontend.py (Streamlit)
-   │ POST /chat {message, session_id}
+app_frontend.py (Streamlit) — un session_id par conversation
+   │ POST /chat {message, session_id} + jeton JWT (HTTPS via Traefik en cluster)
    ▼
 src/main.py (FastAPI) → src/engine.py (GraphEngine)
    │ ChatRequest → AgentEngine.run()
    ▼
-src/graph/pipeline.py (graphe compilé)
+src/graph/pipeline.py (app = workflow.compile())
    │ State initial {question}
    ▼
-rag_node ⇄ rag_tools (fouille locale)
-   │ state.lore, state.is_complete
+rag_node ⇄ rag_tools (fouille locale : FAISS, puis base via l'API Données)
+   │ state.lore
    ▼
-router: should_scrape_or_narrate
-   │ "narration" si le lore suffit, sinon "scraper"
+router: should_scrape_or_narrate (« la récolte suffit-elle ? »)
+   │ "narration" si lore non vide et question locale, sinon "scraper"
    ├─────────────► scraper_node ⇄ scraper_tools
    │                  │ state.web_findings
    ▼                  ▼
@@ -35,6 +35,10 @@ narration_node (plume gothique, sans outils)
    ▼
 ChatResponse {answer, sources, path, trace} → Front → Utilisateur
 ```
+
+En cluster, chaque flèche franchit un réseau Docker isolé : la topologie
+finale (Traefik et TLS, JWT, API Données, Postgres conteneurisé) est au
+chapitre 10, la stack d'observabilité au chapitre 11.
 
 ---
 
@@ -50,24 +54,32 @@ les étapes. Ils se lisent en premier car tout le reste s'appuie dessus.
   FAISS, ddgs, Langfuse v3 épinglé, Loguru…). Projet « application » non packagé
   (`package = false`) : on lance depuis la racine et on importe en `src.*`,
   conformément à l'arborescence du brief. La règle ruff `T201` interdit les
-  `print()` (règle observabilité : Loguru partout).
+  `print()` (règle observabilité : Loguru partout). Version 1.0.0 ;
+  `.python-version` épingle Python 3.12, comme la CI et les images.
 
 ### `src/config.py`
 - **Entrées** : le fichier `.env` à la racine (secrets) + les défauts codés ici.
 - **Sorties** : l'objet unique `settings`, importé partout.
 - **Ce qui s'y passe** : pydantic-settings valide et type tous les réglages —
-  connexion Supabase, modèles Ollama (`qwen2.5:7b`, `nomic-embed-text` 768d),
+  URL de la base (Supabase en dev, Postgres du cluster pour la seule API
+  Données), modèles Ollama (`qwen2.5:7b`, `nomic-embed-text` 768d),
   chemins FAISS, clés Langfuse (vides = monitoring désactivé, fail-open),
   température de la Narration (0.7, seule créative). Une seule source de
   vérité : aucun `os.environ` en dur ailleurs dans le code.
 
 ### `src/logging_conf.py`
 - **Entrées** : `settings.log_level`.
-- **Sorties** : logs lisibles sur stderr + `logs/app.jsonl` (JSON, pour la
-  stack de monitoring de la Phase G).
+- **Sorties** : logs lisibles sur stderr + `logs/app.jsonl` (JSON ; les
+  identifiants de corrélation `session_id`/`request_id` y figurent dans
+  `extra`). Ce fichier est prêt pour un agrégateur de logs mais aucun
+  composant de la stack ne le collecte : en cluster, on lit
+  `docker compose logs`.
 - **Ce qui s'y passe** : configure Loguru une seule fois (`setup_logging()`)
-  et intercepte les logs stdlib (uvicorn, fastapi) via `InterceptHandler` pour
-  n'avoir qu'un seul flux de logs. Appelé au démarrage de l'API et du Front.
+  et intercepte les logs stdlib via `InterceptHandler` pour n'avoir qu'un seul
+  flux de logs, chaque ligne signée par son vrai appelant. Les loggers
+  d'uvicorn, configurés par le serveur avant l'import de l'app, sont
+  explicitement rebranchés (chapitre 17). Appelé par les deux API et par le
+  Front.
 
 ### `src/contracts/schemas.py`
 - **Entrées** : — (définitions pures).
@@ -99,9 +111,10 @@ les étapes. Ils se lisent en premier car tout le reste s'appuie dessus.
 - **Entrées** : construit dans HorRAGor2 à partir des 33 961 titres de la base
   HorRAGor1 (embeddings `nomic-embed-text`, IndexFlatIP cosinus).
 - **Sorties** : la validation titre → id utilisée par l'agent RAG.
-- **Ce qui s'y passe** : copié tel quel depuis HorRAGor2 (gitignoré, 101 Mo).
-  ⚠️ Les ids doivent rester alignés avec la base : si HorRAGor1 recharge ses
-  données, reconstruire l'index.
+- **Ce qui s'y passe** : copié tel quel depuis HorRAGor2 (gitignoré, 101 Mo),
+  ou reconstruit depuis la base par `uv run python -m scripts.build_faiss`
+  (chapitre 17). ⚠️ Les ids doivent rester alignés avec la base : si HorRAGor1
+  recharge ses données, reconstruire l'index.
 
 ---
 
@@ -137,8 +150,9 @@ la suite (ex. récolte locale vide → Scraper).
   avec cet id (seule source autorisée pour les faits — 0 hallucination) et
   enrichit réalisateur/casting via TMDB en best-effort. `find_similar_horror_movies`
   interroge pgvector (contenu des synopsis, pas les titres). Singletons
-  injectables (`set_index`/`set_repository`) : l'API injecte les vrais au
-  démarrage, les tests des fakes.
+  injectables (`set_index`/`set_repository`) : l'API injecte l'index FAISS au
+  démarrage, le repository est construit au premier appel (client de l'API
+  Données en cluster, SQL direct en dev), les tests injectent des fakes.
 
 ### `src/tools/scraper_tool.py` — l'outil de l'Agent Scraper (Enquêteur du Web)
 - **Entrées** : un titre (Wikipédia) ou une requête libre (DuckDuckGo).
@@ -165,40 +179,50 @@ Une requête y entre comme une `question` et en ressort comme une `story`.
   (`rag_messages`, `scraper_messages`) au lieu d'un historique unique. C'est
   l'isolation de contexte du brief : chaque agent ne voit que sa propre
   micro-conversation, la Narration ne voit aucun message. Les autres cases du
-  dossier : `lore` (faits locaux), `is_complete` (jugement du RAG),
-  `web_findings` (faits web), `story` (récit final), `path` (nœuds traversés,
-  reducer `operator.add`).
+  dossier : `lore` (faits locaux, que le routeur juge), `web_findings` (faits
+  web), `story` (récit final), `path` (nœuds traversés, reducer
+  `operator.add`).
 
 ### `src/graph/nodes.py` — les Ouvriers (la logique métier)
 - **Entrées** : `state` (paramètre unique, règle d'or du brief).
 - **Sorties** : un dict de modifications à fusionner — jamais d'effet de bord.
 - **Ce qui s'y passe** : les trois personnalités vivent ici (prompts
   SystemMessage). `rag_node` (température 0, outils `RAG_TOOLS`) fouille en
-  micro-boucle puis **juge sa récolte de façon déterministe** : `is_complete`
-  = au moins un outil a marqué `"found": true` **ET** la question ne réclame
-  pas d'informations hors du périmètre local (`wants_web_details` : mots-clés
-  anecdotes/coulisses/tournage... — la base n'a que métadonnées et synopsis,
-  donc ces demandes envoient l'Enquêteur même si le film est connu). Aucun
-  LLM dans la décision de routage. `scraper_node` reçoit un brief reformulé (question + lore),
-  jamais l'historique du Chercheur (anti-collision de tokens). Il fige ses
-  `web_findings` (faits bruts du web). `narration_node` (température 0.7,
+  micro-boucle puis **fige sa récolte** dans `lore` : les résultats d'outils
+  marqués `"found": true` (`harvest_facts`). Il ne la juge pas : c'est le
+  rôle du routeur. `scraper_node` reçoit un brief reformulé (question +
+  lore), jamais l'historique du Chercheur (anti-collision de tokens). Il fige
+  ses `web_findings` (faits bruts du web). `narration_node` (température 0.7,
   AUCUN outil) reçoit un dossier synthétique — question + lore + web_findings
   — et rien d'autre : l'Écrivain Gothique n'a jamais vu un log technique.
-  Les nœuds ignorent qui précède et qui suit.
+  Les nœuds ignorent qui précède et qui suit, et n'écrivent aucun log :
+  l'instrumentation passe par la trace, les callbacks Langfuse et le moteur.
+  *(Avant le chapitre 17, `rag_node` jugeait lui-même sa récolte dans un
+  booléen `is_complete` que le routeur ne faisait que lire.)*
 
 ### `src/graph/router.py` — les Aiguilleurs (la logique décisionnelle)
 - **Entrées** : `state` (lecture seule).
 - **Sorties** : un `str` — la prochaine destination, rien d'autre.
 - **Ce qui s'y passe** : `should_scrape_or_narrate` (le carrefour stratégique
-  du brief) lit `is_complete` : true → "narration", false → "scraper" (et
-  prudence par défaut : state vide → "scraper"). `should_continue_rag` et
+  du brief) porte **la règle logique** que le brief y place : « le message de
+  l'agent RAG contient-il assez d'informations ? ». Deux critères
+  déterministes, aucun LLM : `lore` non vide **ET** une question qui ne
+  réclame pas d'informations hors du périmètre local (`wants_web_details` :
+  mots-clés anecdotes/coulisses/tournage... — la base n'a que métadonnées et
+  synopsis, donc ces demandes envoient l'Enquêteur même si le film est
+  connu). Oui → "narration", non → "scraper" ; state vide → "scraper" par
+  prudence. La raison de la décision est inscrite dans la trace (« récolte
+  locale vide », « détails web exigés par la question »…). `should_continue_rag` et
   `should_continue_scraper` gèrent les micro-boucles outil (`tool_calls`
   présents → nœud outil). Fonctions pures : testées avec des states forgés,
   sans lancer le pipeline ni le moindre LLM.
 
 ### `src/graph/pipeline.py` — l'Ingénieur Système (le câblage)
 - **Entrées** : nœuds + routeurs (injectables pour les tests).
-- **Sorties** : `app = workflow.compile()` — le livrable importé par FastAPI.
+- **Sorties** : le fichier se termine par `workflow = build_workflow()` puis
+  `app = workflow.compile()` — le livrable du brief, importé par FastAPI. Les
+  tests passent par `build_graph(...)`, qui compile un graphe aux nœuds
+  injectés.
 - **Ce qui s'y passe** : le point de vérité de la topologie, via les trois
   méthodes du brief : `add_node` (5 nœuds : rag, rag_tools, scraper,
   scraper_tools, narration), `add_edge` (START→rag ; micro-boucles
@@ -228,7 +252,9 @@ La requête traverse maintenant tout le système, du navigateur au récit.
   manoir » (la trace complète).
 - **Ce qui s'y passe** : découplage strict — aucune logique LLM/BDD, seulement
   un client HTTP qui revalide la réponse contre le contrat Pydantic partagé.
-  Toute erreur API s'affiche en bulle, jamais de crash. Lancement :
+  Toute erreur API s'affiche en bulle, jamais de crash. Chaque conversation
+  reçoit son `session_id` (uuid4, renouvelé par « Nouvelle conversation ») et
+  le Front journalise via Loguru (chapitre 17). Lancement :
   `uv run streamlit run app_frontend.py`.
 
 ### `src/main.py` — la porte d'entrée (FastAPI/Uvicorn)
@@ -239,7 +265,8 @@ La requête traverse maintenant tout le système, du navigateur au récit.
   manque) et l'injecte dans `rag_tool` ; `/metrics` est exposé dès la
   naissance (prometheus-fastapi-instrumentator — règle observabilité) ;
   `/chat` délègue au moteur via l'abstraction `AgentEngine` (inversion de
-  dépendance : les tests injectent un fake). Lancement :
+  dépendance : les tests injectent un fake) et pose `session_id` et un
+  `request_id` dans le contexte Loguru (chapitre 17). Lancement :
   `uv run uvicorn src.main:app --reload`.
 
 ### `src/engine.py` — le pont contrat ↔ graphe (GraphEngine)
@@ -251,15 +278,17 @@ La requête traverse maintenant tout le système, du navigateur au récit.
   synchrone s'exécute dans `asyncio.to_thread` (la boucle FastAPI ne gèle
   pas, le ContextVar se propage) ; `story` devient `answer`, `path` sort tel
   quel, les `sources` sont dérivées de la trace (kinds faiss/sql/pgvector/
-  tmdb/wikipedia/ddg) ; `_invoke_config()` est le point d'ancrage où la
-  Phase E branchera le CallbackHandler Langfuse ; `log_trace` archive le run
-  dans `logs/traces.jsonl`.
+  tmdb/wikipedia/ddg) ; `_invoke_config()` est le point d'ancrage du
+  CallbackHandler Langfuse (branché au chapitre 4) ; une ligne Loguru résume
+  le run (parcours, tailles du lore, des trouvailles web et du récit) ;
+  `log_trace` archive le run dans `logs/traces.jsonl`.
 
 **Vu en conditions réelles** : `.env` branché sur Supabase (métadonnées
 enrichies TMDB : réalisateur/casting, et recommandations pgvector réelles) ;
 `/health` ok, `/metrics` Prometheus actif, « Des films semblables à
 Midsommar ? » → `[rag, narration]`, 7 étapes de trace, réponse gothique en
-19 s ; Streamlit démarré, `/_stcore/health` = ok (la future cible Uptime Kuma).
+19 s ; Streamlit démarré, `/_stcore/health` = ok (sondé par Uptime Kuma depuis
+le chapitre 11).
 
 ---
 
@@ -268,7 +297,12 @@ Midsommar ? » → `[rag, narration]`, 7 étapes de trace, réponse gothique en
 Langfuse est le « tableau de bord visuel » du registre de bord : chaque
 question devient une **trace** consultable sur `http://localhost:3000`.
 
-### La stack Langfuse (hors du repo : `../langfuse/`, self-hosted)
+### La stack Langfuse (self-hosted)
+
+*(État Phase E : instance hors du repo, lancée par `git clone` comme dans le
+brief. Depuis le chapitre 11, Langfuse est intégré à la stack du projet,
+sans port ClickHouse publié, avec ses clés provisionnées au démarrage.)*
+
 - **Entrées** : les événements envoyés par le CallbackHandler de l'API.
 - **Sorties** : l'UI d'analyse (arbre des décisions, tokens, latences, coûts).
 - **Ce qui s'y passe** : `docker compose up -d` démarre 6 conteneurs — web
@@ -279,10 +313,13 @@ question devient une **trace** consultable sur `http://localhost:3000`.
   décale vers 9002 (les services internes n'en dépendent pas).
 
 ### `src/engine.py::_langfuse_callbacks()` — le branchement
-- **Entrées** : `settings.langfuse_*` (clés du `.env`, générées dans l'UI).
+- **Entrées** : `settings.langfuse_*` (clés du `.env` ; générées dans l'UI à
+  ce stade, provisionnées depuis le chapitre 11).
 - **Sorties** : le `CallbackHandler` passé au graphe via
   `config={"callbacks": [...]}` (le mécanisme exact du brief), plus
-  `langfuse_session_id` pour regrouper les traces par conversation.
+  `langfuse_session_id` pour regrouper les traces par conversation. *(Le
+  Front n'envoyait alors que « default » : une seule session pour tous,
+  corrigé au chapitre 17.)*
 - **Ce qui s'y passe** : **fail-open** — clés absentes ou serveur éteint →
   tuple vide, l'application fonctionne à l'identique. SDK **v3** : l'import
   est `from langfuse.langchain import CallbackHandler` (le snippet v2 du
@@ -319,7 +356,8 @@ sous chaque étape. 83 tests, ~92 % de couverture, exécution < 1 s.
   schéma, httpx/ddgs doublés.
 - **Ce que les tests verrouillent** : les deux chemins du graphe (lore
   suffisant → narration directe ; insuffisant → détour Enquêteur), le
-  jugement déterministe (`harvest_facts`, `wants_web_details` — dont le cas
+  jugement déterministe (`harvest_facts`, `wants_web_details`, routeur depuis
+  le chapitre 17 — dont le cas
   « anecdotes d'un film connu → Enquêteur quand même »), le contrat
   « jamais d'exception » des outils (Ollama éteint, TMDB en panne, réseau
   coupé), le « jamais de 500 » du moteur (récursion, panne → repli gothique),
@@ -327,9 +365,10 @@ sous chaque étape. 83 tests, ~92 % de couverture, exécution < 1 s.
   garde-fou de dimension des embeddings.
 - **CI** (`.github/workflows/ci.yml`) : à chaque push/PR sur main — ruff
   check + format, puis pytest avec `fail_under = 80` (l'exigence du brief est
-  un verrou de build, pas une intention).
-- L'UI Streamlit (`app_frontend.py`) est hors mesure pour l'instant : elle
-  sera testée en Phase G (`st.testing.v1.AppTest`) avec la conteneurisation.
+  un verrou de build, pas une intention). *(État Phase F ; déclencheurs et
+  périmètre élargis au chapitre 13.)*
+- L'UI Streamlit (`app_frontend.py`) était alors hors mesure ; elle est testée
+  depuis le chapitre 8 (`streamlit.testing.v1.AppTest`).
 
 ---
 
@@ -345,7 +384,7 @@ directement par la couche IA.
   film inconnu ; **503** propre si la base est injoignable (jamais de 500 brut).
 - **Ce qui s'y passe** : c'est désormais le SEUL composant à connaître
   `DATABASE_URL` (Supabase encapsulé à ce stade ; décision révisée au
-  chapitre 9 : la base elle-même rejoint le cluster). Réutilise `SupabaseFilmRepository` tel quel,
+  chapitre 9 : la base elle-même rejoint le cluster). Réutilise `SqlFilmRepository` tel quel,
   Loguru, Instrumentator, repository injectable pour les tests. En cluster
   (G3), ce service n'aura **aucun port publié**.
 
@@ -415,7 +454,8 @@ pour verrouiller les échanges avec l'IHM ». Le flux d'une session :
 
 **Vu en réel** : `/chat` sans jeton → 401 ; mauvais mot de passe → 401 ;
 login → paire de jetons ; `/chat` avec Bearer → 200 et récit complet.
-10 tests couvrent la serrurerie (types croisés, expiration, non configurée).
+10 tests couvrent la serrurerie (types croisés, expiration, non configurée) ;
+13 après la révocation des refresh rejoués (chapitre 10).
 
 ---
 
@@ -459,10 +499,27 @@ chapitre 11, et la topologie est durcie au chapitre 10.)*
   un `HEALTHCHECK` (sondes Docker + Uptime Kuma).
 
 ### Les tests de l'UI (`tests/test_frontend.py`)
-- `st.testing.AppTest` pilote le vrai script Streamlit, httpx mocké : porte
-  close sans session, login réussi/refusé, chat complet (récit + parcours +
-  sources), déconnexion. `app_frontend.py` entre dans la couverture —
-  l'exigence « les deux API **et l'UI** » est complète.
+- `streamlit.testing.v1.AppTest` pilote le vrai script Streamlit, httpx
+  mocké : porte close sans session, login réussi/refusé, chat complet (récit
+  + parcours + sources), déconnexion. `app_frontend.py` entre dans la
+  couverture — l'exigence « les deux API **et l'UI** » est complète.
+
+### ⚠️ Pièges rencontrés
+- **« client version 1.24 is too old »** (#2) : Traefik ne découvrait aucun
+  service ; Docker Engine ≥ 28 exige l'API ≥ 1.44, que l'ancien client de
+  Traefik ne négociait pas. Correctif : `traefik:v3` +
+  `DOCKER_API_VERSION=1.44`.
+- **504 vers l'API IA** (#3) : api-ia a deux pattes réseau et Traefik
+  choisissait parfois l'IP de `data_net`, qu'il ne peut pas joindre.
+  Correctif : `--providers.docker.network=horragor3_front_net`.
+- Les deux correctifs sont devenus sans objet au chapitre 10, quand le
+  routage est passé en fichier : plus de socket Docker, et chaque service est
+  visé par son nom sur le réseau partagé.
+
+**Vu en réel** : les deux pièges ci-dessus sont apparus au premier démarrage
+du cluster. La vérification complète de la topologie (TLS vérifié, seul le 443
+publié, login puis `/chat`, `api-donnees` injoignable) a été faite une fois la
+base intégrée : elle est consignée au chapitre 9.
 
 ---
 
@@ -505,7 +562,7 @@ api-ia ──data_net (internal)──> api-donnees ──db_net (internal)─�
 - Healthcheck `pg_isready -h 127.0.0.1` : pendant la restauration, le serveur
   temporaire n'écoute que sur le socket Unix, donc « healthy » seulement une
   fois la base prête ; `api-donnees` attend cette condition (`depends_on`).
-- Le code applicatif n'a pas changé d'une ligne : `SupabaseFilmRepository`
+- Le code applicatif n'a pas changé d'une ligne : `SqlFilmRepository`
   parle du SQL standard et `<=>` (pgvector) — seul `DATABASE_URL` diffère.
 
 **Vu en réel** (2026-10-19) : dump en 40 s ; restauration + index HNSW en 35 s
@@ -593,7 +650,7 @@ uid 1001 pour front/api-ia/api-donnees ; rôle `horragor_ro` : `DELETE` refusé
 
 ---
 
-## Chapitre 11 — Le monitoring à 360° (Phase G4)
+## Chapitre 11 — Le monitoring à 360° (Phase G)
 
 Le brief : « monitoré à 360° en temps réel via une stack Docker unifiant
 Prometheus, Grafana, Uptime Kuma (pour la télémétrie des 3 composants) et
@@ -602,7 +659,7 @@ Langfuse (pour l'agent) ». Tout démarre avec le même `docker compose up -d`.
 ```
 api-ia ─────langfuse_ingest──> langfuse-web ──langfuse_net (internal)──> postgres · clickhouse · redis · minio · worker
 prometheus ──ia_net/data_net──> api-ia:8000 · api-donnees:8100 · traefik:8082   (/metrics)
-grafana ──obs_net──> prometheus            uptime-kuma ──(une patte par réseau)──> 9 sondes
+grafana ──obs_net──> prometheus            uptime-kuma ──(une patte par réseau)──> 10 sondes
 UIs : 127.0.0.1 → Langfuse :3000 · Kuma :3001 · Grafana :3002 · Prometheus :9090
 ```
 
@@ -640,13 +697,15 @@ UIs : 127.0.0.1 → Langfuse :3000 · Kuma :3001 · Grafana :3002 · Prometheus 
 
 ### `scripts/setup_uptime_kuma.py` — les sondes, as code aussi
 - Uptime Kuma n'a pas de provisioning par fichier : le script (idempotent,
-  `uv run --env-file .env --with uptime-kuma-api`) crée le compte admin puis 9 sondes — les
+  `uv run --env-file .env --with uptime-kuma-api`) crée le compte admin puis
+  10 sondes (la 10ᵉ, Ollama via le relais, ajoutée au chapitre 16) — les
   deux **entrées publiques en TLS vérifié** (Kuma fait confiance à la CA
   locale via `NODE_EXTRA_CA_CERTS`), Streamlit, API IA, API Données, la
   **chaîne API → Postgres** (sonde à mot-clé : `/films/41` doit contenir
   « Hereditary »), Langfuse, Prometheus, Grafana.
 
-**Vu en réel** (2026-10-19) : 14 conteneurs démarrés par une seule commande ;
+**Vu en réel** (2026-10-19) : 14 conteneurs démarrés par une seule commande
+(15 avec le relais Ollama du chapitre 16) ;
 cibles Prometheus `api-ia`, `api-donnees`, `traefik`, `prometheus` toutes
 **up** ; métriques `http_requests_total{job, handler, status}` et
 `traefik_service_requests_total{service="front@file"|"api@file"}` présentes ;
@@ -689,10 +748,12 @@ complète de votre graphe multi-agent ».
   MPD **réel** extrait de la base du cluster (`information_schema`), qui
   montre `movie_embeddings` (`vector(768)`, ajoutée par HorRAGor2).
 - **Le livre du projet** (ce document) et le plan directeur, inclus tels quels.
+- Ajoutées au chapitre 17 : une page par agent (rôle, entrées et sorties du
+  State, outils, mesures Langfuse) et le guide « Lire la console et les logs ».
 
 **Vu en réel** (2026-10-19) : `sphinx-build -W` (avertissements = erreurs) sans
-un seul avertissement ; 4 diagrammes Mermaid rendus en SVG dans Chrome headless
-(graphe, MLD, MPD, architecture) ; endpoints des deux API et OpenAPI
+un seul avertissement ; les diagrammes Mermaid (graphe, MLD, MPD, les deux
+schémas d'architecture) rendus en SVG dans Chrome headless ; endpoints des deux API et OpenAPI
 téléchargeables présents ; autodoc de `rag_node`, `should_scrape_or_narrate`,
 `validate_film`, `refresh`…
 
@@ -737,7 +798,7 @@ localement avec les mêmes Dockerfiles (cluster du chapitre 11) ; 118 tests,
 couverture 94 % (API IA 94 %, API Données 95 %, UI 95 %) — la revue QA a
 ajouté les tests du refresh silencieux côté UI et du fail-open Langfuse.
 
-**Vu sur GitHub** (2026-10-20) : CI et CD en mode PR verts sur les PR de la
+**Vu sur GitHub** (2026-10-19) : CI et CD en mode PR verts sur les PR de la
 pile ; premier CD réel au merge de #15 dans `main` — 6 jobs verts (CI rejouée
 en garde-fou, 3 images, doc, Pages) ; images `ghcr.io/os974/horragor3-*`
 publiées en `latest` + `sha-<commit>` et **publiques** (téléchargeables sans
@@ -747,9 +808,10 @@ https://os974.github.io/HorRAGor3/ (Pages activé en mode « GitHub Actions »).
 ⚠️ **Comportement déviant** (#19) : la branche de base n'ayant pas été
 supprimée après le merge de #15, GitHub a recibé les PR empilées #16 à #18
 sur `ci/cd-ghcr-pages` au lieu de `main` — `main` et la doc publiée ont
-manqué les trois derniers commits. Rattrapé par une PR dédiée vers `main`.
-Leçon : dans une pile de PR, supprimer la branche de base après **chaque**
-merge (ou activer « Automatically delete head branches »).
+manqué les trois derniers commits. Rattrapé par la PR #20 vers `main`, qui
+clôt #19. Leçon : dans une pile de PR, supprimer la branche de base après
+**chaque** merge ; l'option « Automatically delete head branches » est
+désormais activée sur le dépôt.
 
 ---
 
@@ -780,7 +842,8 @@ https://github.com/os974/HorRAGor3/issues, labellisés par nature
 (`anomalie`, `comportement-déviant`, `sécurité`) et par couche (`données`,
 `intelligence`, `cluster`, `observabilité`, `ci-cd`), chacun clos avec la
 référence de son correctif. Puis #19, ouvert au premier passage du CD
-(chapitre 13) et clos par la PR qui le corrige.
+(chapitre 13) et clos par la PR #20 ; enfin #22 à #25, les écarts de la
+vérification finale (chapitre 17).
 
 ---
 
@@ -846,8 +909,131 @@ TLS → JWT → api-ia → API Données → Postgres, + TMDB et web) :
   des outils (`lookup_movie`, `web_search`, `wikipedia_synopsis`) ;
 - Prometheus : `/chat` 2 × `2xx` ; **10 sondes Uptime Kuma UP**.
 
-### Et ensuite
-Tickets archivés (chapitre 14), pile de PR mergée dans `main`, images sur
-GHCR et documentation en ligne (chapitre 13) : l'épilogue du brief est livré.
+### La livraison
+- PR #11 à #18 mergées ; #16 à #18, arrivées par erreur sur
+  `ci/cd-ghcr-pages`, rejoignent `main` par la PR #20, qui clôt #19.
+- Le 2026-10-19, les messages de commit des phases A à F sont réécrits
+  (lignes de co-auteur retirées, contenu des fichiers inchangé) : tous les
+  hashes changent, et la PR #21 reporte les nouveaux dans la documentation et
+  les tickets.
+- CD vert sur `main` : images publiques sur GHCR, documentation en ligne
+  (chapitre 13) ; tickets archivés (chapitre 14).
 
 *Fin de la Phase G — l'épilogue MLOps du brief.*
+
+---
+
+## Chapitre 17 — La vérification finale (la lettre du brief)
+
+Dernière relecture du brief, du plan et de la documentation, confrontés au
+code. Le système tournait, mais six points s'écartaient de la lettre du brief
+ou des règles du plan. Chacun a été tracé par un ticket (#22 à #25), puis
+corrigé.
+
+### `src/graph/router.py` — la règle logique revient à l'aiguilleur (#22)
+- **Le brief (p. 3)** : c'est dans `router.py` qu'on écrit « les règles
+  logiques (ex. : le message de l'agent RAG contient-il assez
+  d'informations ? Si oui "narration", sinon "scraper") ».
+- **Avant** : `rag_node` jugeait sa récolte (`is_complete`), le routeur ne
+  lisait qu'un booléen.
+- **Après** : `should_scrape_or_narrate` décide sur `lore` et sur la question
+  (`wants_web_details` déménage dans le routeur) ; `is_complete` disparaît du
+  State. Le nœud récolte, le routeur juge et aiguille, et la raison de la
+  décision est écrite dans la trace.
+
+### `src/graph/pipeline.py` — la dernière ligne du livrable (#22)
+- **Le brief (p. 4)** : « ce fichier se termine par `app = workflow.compile()` ».
+- **Avant** : `app = build_graph()`, équivalent mais pas à la lettre.
+- **Après** : `build_workflow()` renvoie le `StateGraph` câblé ; le fichier se
+  termine par `workflow = build_workflow()` puis `app = workflow.compile()`.
+
+### `src/graph/nodes.py` et `src/engine.py` — des nœuds purs (#22)
+- Les trois `logger.info` métier des nœuds sont retirés (règle « nœuds purs,
+  instrumentation centralisée » du plan). Le moteur journalise une ligne de
+  résumé par run : `Graphe : rag → scraper → narration (lore 626 car., web
+  1810 car., récit 1762 car.)`.
+
+### La corrélation, de l'écran aux traces (#23)
+- `app_frontend.py` : chaque conversation reçoit son `session_id` (uuid4),
+  renouvelé par « Nouvelle conversation » et à la déconnexion. Jusque-là, le
+  Front envoyait toujours « default » : toutes les conversations de tous les
+  visiteurs tombaient dans la même session Langfuse.
+- `src/main.py` : `/chat` pose `session_id` et un `request_id` (8 caractères)
+  dans le contexte Loguru ; toutes les lignes du run, graphe compris, les
+  portent dans le champ `extra` du JSON. `logs/traces.jsonl` enregistre aussi
+  le `session_id`.
+
+### Loguru de bout en bout (#24)
+- `src/logging_conf.py` : les loggers d'uvicorn (handlers posés par le serveur
+  avant l'import de l'app, sans propagation) contournaient Loguru ; ils sont
+  rebranchés. L'`InterceptHandler` signait chaque log de la stdlib
+  « logging:callHandlers » : il remonte désormais jusqu'au vrai appelant.
+- `app_frontend.py` : le Front journalise via Loguru (refus de connexion,
+  nouvelle conversation, échec de `/chat`), comme les deux API.
+- Healthchecks ajoutés à `langfuse-web`, `langfuse-worker` (qui n'écoute que
+  sur `$HOSTNAME`) et `ollama-relay` (chemin complet passerelle → relais →
+  Ollama) : les 15 conteneurs ont désormais un état de santé.
+
+### `scripts/build_faiss.py` — un index reproductible (#25)
+- **Entrées** : la table `movies` (`DATABASE_URL`) et Ollama.
+- **Sorties** : `data/faiss_index/` (ou `--out`), `--limit` pour un essai.
+- **Ce qui s'y passe** : repris du `build_faiss.py` de HorRAGor2, il réutilise
+  `TitleIndex.build_from_pairs`, qui n'était appelé nulle part : sur un clone
+  neuf, l'index du brief se reconstruit en une commande.
+
+### Les finitions
+- `.env.example` documente toutes les variables lues ; les réglages jamais
+  lus (`API_HOST`, `API_PORT`, `TITLES_DB_PATH`) sont retirés avec leurs
+  champs de `config.py`. `.python-version` épingle Python 3.12.
+- `SupabaseFilmRepository` devient `SqlFilmRepository` (en cluster, il
+  interroge le Postgres conteneurisé). Les bouchons `validate_film` qui
+  levaient `NotImplementedError` quittent le Protocol et les deux
+  repositories : la validation floue appartient à FAISS.
+- La fixture SQLite des tests ferme sa connexion (plus de `ResourceWarning`
+  en Python 3.13).
+- Sphinx : une page par agent et le guide de la console ; le formulaire
+  « comportement déviant » gagne la nature « CI/CD ».
+
+### L'analyse Langfuse chiffrée (exigence p. 5)
+Deux questions posées à travers tout le cluster (Traefik TLS → JWT → api-ia),
+dans la même conversation (`session_id` `verif-finale-ead05fd2`), puis lues
+dans l'API publique de Langfuse (`/api/public/traces?sessionId=…`,
+`/api/public/observations?traceId=…`).
+
+| Nœud | Q1 « Parle-moi du film Hereditary » | Q2 « Des anecdotes de tournage de The Thing ? » |
+|---|---|---|
+| Parcours | `rag → narration` | `rag → scraper → narration` |
+| `rag` (2 générations) | 11,6 s · 1 293 tokens in / 122 out | 2,8 s · 1 321 in / 100 out |
+| `rag_tools` | 1,1 s (`lookup_movie`) | 1,1 s (`lookup_movie`) |
+| Routeur | « récolte locale suffisante » | « détails web exigés par la question » |
+| `scraper` (3 générations) | — | 13,6 s · 3 642 in / 294 out |
+| `scraper_tools` | — | 3,0 s (`web_search` 2,4 s, `wikipedia_synopsis` 0,6 s) |
+| `narration` (1 génération) | 8,0 s · 421 in / 326 out | 12,7 s · 964 in / 498 out |
+| Routeurs (`should_continue_*`) | < 0,01 s | < 0,01 s |
+| **Total** | **20,8 s · 1 714 in / 448 out** | **33,3 s · 5 927 in / 892 out** |
+
+Ce qu'on en lit :
+- **Le coût est dans les générations, pas dans les outils** : les outils
+  pèsent 1 à 3 s, les routeurs rien ; une génération locale va d'environ 1 s
+  (une décision d'outil) à 13 s (le récit, 300 à 500 tokens écrits).
+- **Le premier appel paie le chargement du modèle** : 11,6 s pour le RAG de
+  Q1 contre 2,8 s pour le même travail en Q2 (qwen2.5:7b venait d'être
+  rechargé en mémoire GPU après la reconstruction du cluster).
+- **Le détour par l'Enquêteur coûte cher** : 16,6 s (le Scraper et ses
+  outils) et 3,5 fois plus de tokens d'entrée au total (5 927 contre 1 714).
+  Le routeur ne l'envoie que lorsque c'est nécessaire.
+- **Le context trimming se mesure** : la Narration reçoit 421 tokens (Q1) et
+  964 tokens (Q2), contre 1 293 et 3 642 dans les canaux du Chercheur et de
+  l'Enquêteur. L'Écrivain ne voit que le dossier, jamais les échanges
+  d'outils.
+
+**Vu en réel** (2026-10-19) : cluster reconstruit sur ce code, 15 conteneurs
+*healthy* ; les deux parcours ci-dessus, dont les deux traces Langfuse sont
+dans une même session ; lignes JSON d'api-ia portant `session_id` et
+`request_id`, accès uvicorn au format Loguru ; une connexion refusée dans le
+conteneur du Front journalisée « Connexion refusée par l'API (HTTP 401) » ;
+`scripts/build_faiss.py --limit 300` : 300 titres en 33 s, « Get Out »
+retrouvé avec un score de 1,000 ; 123 tests, couverture 96 % (API IA 95 %,
+API Données 95 %, UI 99 %).
+
+*Fin du projet.*

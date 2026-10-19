@@ -30,11 +30,13 @@ def _fake_api(
     answer="Récit des ténèbres.",
     stale_access=False,
     refresh_ok=True,
+    chat_payloads=None,
 ):
     """Détourne httpx.post : /auth/login, /auth/refresh et /chat sont simulés.
 
     ``stale_access`` : le premier access token (« acc ») est expiré → 401 sur
-    /chat ; ``refresh_ok`` : le refresh token est encore accepté ou non.
+    /chat ; ``refresh_ok`` : le refresh token est encore accepté ou non ;
+    ``chat_payloads`` : liste qui reçoit chaque corps envoyé à /chat.
     """
 
     def fake_post(url, json=None, headers=None, timeout=None):
@@ -51,6 +53,8 @@ def _fake_api(
                 200, {"access_token": "acc2", "refresh_token": "ref2", "token_type": "bearer"}
             )
         if url.endswith("/chat"):
+            if chat_payloads is not None:
+                chat_payloads.append(json)
             if stale_access and headers["Authorization"] == "Bearer acc":
                 return FakeResponse(401)
             return FakeResponse(
@@ -141,6 +145,21 @@ def test_refresh_refuse_demande_une_reconnexion(monkeypatch):
     at = _ask_with_session(monkeypatch, stale_access=True, refresh_ok=False)
 
     assert "session expirée" in at.session_state["messages"][-1]["content"]
+
+
+def test_une_conversation_garde_son_session_id(monkeypatch):
+    """Deux questions → même session_id (≠ « default ») ; « Nouvelle conversation » en change."""
+    payloads: list[dict] = []
+    at = _ask_with_session(monkeypatch, chat_payloads=payloads)
+    at.chat_input[0].set_value("Et Hereditary ?").run(timeout=10)
+
+    first, second = (p["session_id"] for p in payloads)
+    assert first == second != "default"
+    assert len(first) == 32  # uuid4 hexadécimal
+
+    at.button[1].set_value(True).run()  # « Nouvelle conversation »
+    at.chat_input[0].set_value("Et Midsommar ?").run(timeout=10)
+    assert payloads[-1]["session_id"] != first
 
 
 def test_deconnexion_purge_la_session(monkeypatch):

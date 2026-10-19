@@ -2,6 +2,7 @@
 
 import pytest
 from fastapi.testclient import TestClient
+from loguru import logger
 
 import src.main as main
 from src.auth import require_access
@@ -56,6 +57,20 @@ def test_chat_delegue_au_moteur(client):
     body = resp.json()
     assert body["answer"] == "BOUH:Alien ?"
     assert body["path"] == ["rag", "narration"]
+
+
+def test_chat_pose_les_ids_de_correlation_dans_les_logs(client):
+    """Chaque ligne de log de /chat porte session_id et request_id (champ extra)."""
+    records: list[dict] = []
+    handler_id = logger.add(lambda message: records.append(message.record), level="INFO")
+    try:
+        client.post("/chat", json={"message": "Alien ?", "session_id": "conv-42"})
+    finally:
+        logger.remove(handler_id)
+    chat_logs = [r for r in records if "POST /chat" in r["message"]]
+    assert chat_logs
+    assert chat_logs[0]["extra"]["session_id"] == "conv-42"
+    assert len(chat_logs[0]["extra"]["request_id"]) == 8
 
 
 def test_chat_valide_la_requete(client):

@@ -44,7 +44,7 @@ horRAGor-project/
 - **pipeline.py** : point de vérité de la topologie ; se termine par `app = workflow.compile()` importé par FastAPI
 
 ### Monitoring — Langfuse
-- Auto-hébergé : `git clone langfuse` + `docker compose up -d` → UI sur `http://localhost:3000`
+- Auto-hébergé : `git clone langfuse` + `docker compose up -d` → UI sur `http://localhost:3000` (procédure du brief, suivie en Phase E ; Langfuse est ensuite intégré à la stack du projet, décision 5)
 - Compte local + projet → clés `LANGFUSE_PUBLIC_KEY` / `LANGFUSE_SECRET_KEY` / `LANGFUSE_HOST`
 - `CallbackHandler` passé via `config={"callbacks": [langfuse_handler]}` à `agent.invoke(inputs, config=config)`
 - Analyse attendue : consommation tokens, latence par nœud, tracé des appels d'outils, arbre de décisions du graphe
@@ -79,7 +79,7 @@ Pipeline ETL multi-sources (TMDB, IMDB, Kaggle, Rotten Tomatoes/Selenium, Spark 
 - **Base peuplée** : `data/horragor.db` (SQLite, ~34 000 films d'horreur, 294k mots-clés) ; bascule SQLite/Supabase via `DATABASE_URL` (`src/horragor/db/database.py`)
 - **ORM réutilisable** : `src/horragor/db/models.py` (movies, genres, movie_genres, ratings, movie_keywords, sources_metadata)
 - **Dataset Gold dénormalisé** : `data/gold/horragor_gold.parquet` (synopsis, mots-clés, genres, scores multi-sources, consensus critiques) — matière première idéale pour l'index FAISS
-- ⚠️ Pour l'épilogue MLOps : la BDD n'a **pas encore d'API dédiée** — elle sera à créer (exigence « couche Données derrière sa propre API, réseau privé Docker »)
+- ⚠️ Pour l'épilogue MLOps : la BDD n'avait **pas d'API dédiée** — créée en G1 (`services/data_api`, exigence « couche Données derrière sa propre API, réseau privé Docker »)
 
 ### HorRAGor2 (`/home/olivier/Bureau/Simplon/HorRAGor2`) — le monolithe à casser
 Agent ReAct LangGraph (déjà `langgraph>=1.2.4` !) avec nœud Juge anti-hallucination, API FastAPI async, front Streamlit découplé, 16 fichiers de tests, CI GitHub Actions (ruff + pytest). Pas de Docker. Modèles : **`qwen2.5:7b`** (agent + juge), **`nomic-embed-text`** 768d.
@@ -121,7 +121,7 @@ Analyse de la stack du brief (Langfuse, Loguru, Prometheus, Grafana, Uptime Kuma
 6. **⚠️ Langfuse SDK v3** : le snippet du PDF est en v2 (`from langfuse.callback import CallbackHandler`) ; en v3 : `from langfuse.langchain import CallbackHandler`, clés lues depuis l'env. Pinner la version. Self-hosted v3 = 6 conteneurs (web, worker, Postgres, ClickHouse, Redis, MinIO) : prévoir la RAM, TZ UTC, volumes persistants ClickHouse
 7. **Plan de ports fixé d'avance** (collision Langfuse/Grafana, tous deux sur 3000 par défaut) : Langfuse 3000, Uptime Kuma 3001, Grafana 3002, API 8000, Streamlit 8501, Prometheus 9090
 8. **Config 12-factor** : toutes les URLs/clés d'outillage via `config.py` (pydantic-settings + `.env`) — pas de `os.environ[...] = "..."` en dur comme dans le snippet du PDF
-9. **Provisioning as code (Phase G)** : dashboards Grafana JSON + datasources YAML versionnés (`grafana/provisioning/`) ; réseaux Docker et noms de conteneurs fixés tôt (scrape configs et cibles Uptime Kuma stables)
+9. **Provisioning as code (Phase G)** : dashboards Grafana JSON + datasources YAML versionnés (`monitoring/grafana/provisioning/`) ; réseaux Docker et noms de conteneurs fixés tôt (scrape configs et cibles Uptime Kuma stables)
 
 ## Règle de travail — lifecycle, le « livre du projet »
 
@@ -136,22 +136,22 @@ Tenir `docs/lifecycle.md` **au fil de l'eau** (pas à la fin) : le cycle de vie 
 
 ## Étapes d'implémentation
 
-> **État d'avancement** — ✅ A (commit `f8a1cd3`) · ✅ B (`44c0d54`) · ✅ C (`5a72816`) · ✅ D (`9e28c49`) · ✅ E (`564abea`, Langfuse + routage sensible au type de question) · ✅ F (`06cb5f7`, 83 tests, 92 %, CI) · G : ✅ G1 API Données (`8b46e96`) · ✅ G2 Refresh Tokens JWT (`5edd066`) · ✅ G3 cluster Docker + TLS (`58f0d73`) · ✅ BDD conteneurisée (`518c51c`) · ✅ durcissement après revue de sécurité (`68685b9`) · ✅ monitoring 360° (`db1cd65`) · ✅ Sphinx (`a6cd6aa`) · ✅ CI/CD (`8e5ee5d`, premier passage au merge sur `main`) · ✅ Issues (formulaires `59397d6`, tickets #1–#10 archivés, #19) · ✅ relais Ollama, récit de bout en bout en conteneurs (`5577c70`). PR #11–#18 mergées (rattrapage de #16–#18 vers `main` : #19) ; CD réel vert : images publiques sur GHCR, doc sur https://os974.github.io/HorRAGor3/. **Phase G terminée.**
-> (Hashs réécrits le 2026-07-10 avant le premier push : correction de l'email d'auteur → `olivier.schollaert@live.be` ; puis le 2026-10-20 : nettoyage de lignes de co-auteur dans les messages des phases A–F, contenu inchangé, références mises à jour.)
-> Réalisations notables : E2E validé sur les deux chemins avec qwen2.5:7b (18 s / 26 s) ; jugement de récolte déterministe (marqueur `"found"`) ; un canal de messages par agent (context trimming) ; API `/health` + `/metrics` + `/chat` et front Streamlit vérifiés en réel sur Supabase (TMDB + pgvector).
+> **État d'avancement** — ✅ A (commit `f8a1cd3`) · ✅ B (`44c0d54`) · ✅ C (`5a72816`) · ✅ D (`9e28c49`) · ✅ E (`564abea`, Langfuse + routage sensible au type de question) · ✅ F (`06cb5f7`, 83 tests, 92 %, CI) · G : ✅ G1 API Données (`8b46e96`) · ✅ G2 Refresh Tokens JWT (`5edd066`) · ✅ G3 cluster Docker + TLS (`58f0d73`) · ✅ BDD conteneurisée (`518c51c`) · ✅ durcissement après revue de sécurité (`68685b9`) · ✅ monitoring 360° (`db1cd65`) · ✅ Sphinx (`a6cd6aa`) · ✅ CI/CD (`8e5ee5d`, premier passage au merge sur `main`) · ✅ Issues (formulaires `59397d6`, tickets #1–#10 archivés, #19) · ✅ relais Ollama, récit de bout en bout en conteneurs (`5577c70`). PR #11–#21 mergées (#16–#18 mergées par erreur dans `ci/cd-ghcr-pages`, ticket #19, rattrapées vers `main` par la PR #20 ; PR #21 : hashes après réécriture) ; CD réel vert : images publiques sur GHCR, doc sur https://os974.github.io/HorRAGor3/. **Phase G terminée.** · ✅ Vérification finale contre la lettre du brief (tickets #22–#25, livre ch. 17) : règle de suffisance dans `router.py`, `app = workflow.compile()`, nœuds purs, corrélation par conversation, Loguru de bout en bout, healthchecks des 15 conteneurs, `scripts/build_faiss.py`, analyse Langfuse chiffrée.
+> (Hashs réécrits le 2026-07-10 avant le premier push : correction de l'email d'auteur → `olivier.schollaert@live.be` ; puis le 2026-10-19 : nettoyage de lignes de co-auteur dans les messages des phases A–F, contenu inchangé, références mises à jour.)
+> Réalisations notables : E2E validé sur les deux chemins avec qwen2.5:7b (18 s / 26 s) ; jugement de récolte déterministe (marqueur `"found"`) ; un canal de messages par agent (context trimming) ; API `/health` + `/metrics` + `/chat` et front Streamlit vérifiés en réel sur Supabase (TMDB + pgvector), puis récit de bout en bout à travers le cluster (livre ch. 16) et analyse Langfuse chiffrée par nœud (livre ch. 17).
 
 ### Phase A — Socle du projet
 1. Initialiser le repo : `git init`, `uv init` (Python ≥ 3.12), `pyproject.toml` avec `langgraph`, `langchain-ollama`, `langchain-core`, `faiss-cpu`, `fastapi`, `uvicorn[standard]`, `streamlit`, `httpx`, `pydantic-settings`, `sqlalchemy`, `psycopg[binary]`, `pgvector`, `ddgs`, `langfuse` ; dev : `ruff`, `pytest`, `pytest-asyncio`
 2. Créer l'arborescence hybride actée (voir Décisions) ; `.env.example` sur le modèle de HorRAGor2
 3. Reprendre de HorRAGor2 : `config.py` (adapté : + clés Langfuse), `contracts/schemas.py` + `interfaces.py`, `trace.py`
-4. Copier `faiss_index/` de HorRAGor2 vers `data/faiss_index/` (ou script de reconstruction `build_faiss.py` repris)
+4. Copier `faiss_index/` de HorRAGor2 vers `data/faiss_index/` (ou script de reconstruction `build_faiss.py` repris — fait : `scripts/build_faiss.py`)
 
 ### Phase B — Les outils natifs (src/tools/)
 5. `rag_tool.py` : regrouper les fonctions data de HorRAGor2 (`validate_film` FAISS, `query_movie_metadata` SQL, `find_similar_horror_movies` pgvector) — fonctions pures, jamais d'exception (`{"found": false}` / `[]`)
 6. `scraper_tool.py` : `scrape_detailed_synopsis` (Wikipédia, repris) + nouvelle recherche DuckDuckGo (`ddgs`) pour anecdotes/détails — même contrat « ne lève jamais »
 
 ### Phase C — Le graphe multi-agent (cœur du brief)
-7. `models/state.py` : `AgentState(TypedDict)` — `messages: Annotated[list, add_messages]` + champs métier explicites (`lore` : résultats RAG, `web_findings` : résultats scraper, `is_complete` : jugement du RAG, `story` : sortie narration) pour le context trimming
+7. `models/state.py` : `AgentState(TypedDict)` — `messages: Annotated[list, add_messages]` + champs métier explicites (`lore` : résultats RAG, `web_findings` : résultats scraper, `is_complete` : jugement du RAG, `story` : sortie narration) pour le context trimming — *réalisé : un canal de messages par agent ; `is_complete` retiré à la vérification finale, le routeur jugeant lui-même `lore` (livre ch. 17)*
 8. `graph/nodes.py` : `rag_node` (LLM + rag tools via micro-boucle `ToolNode`), `scraper_node` (LLM + scraper tools), `narration_node` (**sans outils**, prompt « Écrivain Gothique », ne reçoit que la synthèse — context trimming, pas tout l'historique) — signature unique `(state: AgentState) -> dict`, aucun nœud ne connaît ses voisins
 9. `graph/router.py` : `should_scrape_or_narrate(state) -> Literal["scraper", "narration"]` (juge la complétude de la récolte locale) + routeurs de micro-boucle outils (`-> Literal["rag_tools", ...]`) — pattern MultiAgent « le nœud juge, le routeur aiguille », fallback sûr
 10. `graph/pipeline.py` : câblage sur le modèle de `build_peer_graph` (MultiAgent) avec nœuds/outils **injectables** pour tester sans LLM :
@@ -163,7 +163,7 @@ Tenir `docs/lifecycle.md` **au fil de l'eau** (pas à la fin) : le cycle de vie 
 13. `app_frontend.py` : Streamlit adapté de `src/front/streamlit/app.py` — afficher quel(s) agent(s) ont travaillé (trace du parcours du graphe)
 
 ### Phase E — Monitoring Langfuse (exigence explicite du PDF)
-14. Déployer Langfuse self-hosted : `git clone https://github.com/langfuse/langfuse && docker compose up -d` → UI `http://localhost:3000`, créer compte local + projet → clés
+14. Déployer Langfuse self-hosted : `git clone https://github.com/langfuse/langfuse && docker compose up -d` → UI `http://localhost:3000`, créer compte local + projet → clés *(remplacé en G par `monitoring/langfuse/compose.yml` et l'init headless, décision 5)*
 15. Intégrer `CallbackHandler` : clés dans `.env`/`config.py`, passer `config={"callbacks": [langfuse_handler]}` à l'invoke du graphe — ⚠️ SDK v3 : `from langfuse.langchain import CallbackHandler` (le snippet du PDF est en v2), clés lues depuis l'env
 16. Livrable d'analyse : tokens par nœud, latence par agent, tracé des tool calls, arbre de décision du routeur
 
@@ -175,15 +175,15 @@ Tenir `docs/lifecycle.md` **au fil de l'eau** (pas à la fin) : le cycle de vie 
 19. **API Données dédiée** (nouvelle — n'existe pas dans HorRAGor1) : petite FastAPI CRUD lecture devant la BDD, conteneurisée, réseau privé Docker uniquement
 20. **Conteneurisation 3 couches** : `docker-compose.yml` avec réseau privé étanche (BDD + API données), API IA (**auth JWT access + refresh tokens**), Streamlit isolé (HTTPS vers l'API IA) ; Traefik en frontal, 443 seul port ouvert vers l'extérieur
 21. **BDD dans le cluster** (décision 4) : service Postgres + pgvector sur `db_net` (interne, joint par la seule API Données, rôle en lecture seule) sans port publié, alimenté par `pg_dump` de Supabase ; index HNSW recréé localement ; l'API Données perd toute sortie réseau
-22. **Observabilité** : Loguru bout en bout, Prometheus + Grafana (provisioning as code) + Uptime Kuma (télémétrie des 3 composants, l'UI via les métriques Traefik), Langfuse intégré au compose (init headless `LANGFUSE_INIT_*`) ; UIs d'admin liées à 127.0.0.1 selon le plan de ports
+22. **Observabilité** : Loguru bout en bout, Prometheus (télémétrie des 3 composants, l'UI via les métriques Traefik) + Grafana (provisioning as code) + Uptime Kuma (sondes des 3 couches et des outils), Langfuse intégré au compose (init headless `LANGFUSE_INIT_*`) ; UIs d'admin liées à 127.0.0.1 selon le plan de ports
 23. **Gouvernance** : doc Sphinx (autodoc des 2 API, schéma relationnel — reprendre docs/merise de HorRAGor1 —, cartographie du graphe via l'export Mermaid), GitHub Issues pour chaque anomalie (y compris celles déjà rencontrées et documentées dans le lifecycle)
 24. **CD** (décision 6) : workflow GitHub Actions sur `main` → images GHCR + doc Sphinx sur GitHub Pages
 
 ## Vérification
 
 - **Routage sans LLM** : pytest sur `router.py` avec des states forgés (lore complet → "narration" ; lore vide → "scraper")
-- **Graphe bout en bout** : `app.invoke({"messages": [HumanMessage("Parle-moi de Hereditary")]})` → vérifier le chemin RAG→narration (film connu) vs RAG→scraper→narration (film obscur/absent de la base)
+- **Graphe bout en bout** : `app.invoke({"question": "Parle-moi de Hereditary"})` → vérifier le chemin RAG→narration (film connu) vs RAG→scraper→narration (film obscur/absent de la base)
 - **API** : `curl POST /chat` + `GET /health` ; front Streamlit conversationnel
-- **Langfuse** : traces visibles sur `localhost:3000` avec l'arbre des nœuds et le coût par agent
+- **Langfuse** : traces visibles sur `localhost:3000` avec l'arbre des nœuds et le coût par agent, regroupées par conversation (`session_id`)
 - **Narration isolée** : vérifier dans les traces que `narration_node` ne reçoit que la synthèse (pas les logs d'outils bruts)
-- Prérequis d'exécution : Ollama (`qwen2.5:7b`, `nomic-embed-text`), Supabase joignable (ou repli SQLite HorRAGor1), Docker pour Langfuse
+- Prérequis d'exécution : Ollama sur l'hôte (`qwen2.5:7b`, `nomic-embed-text`) ; en cluster, Docker (Compose ≥ 2.20) et la base restaurée depuis le dump ; Supabase ne sert qu'à produire le dump et au mode dev hors cluster (ou repli SQLite HorRAGor1)

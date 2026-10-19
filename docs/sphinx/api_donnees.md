@@ -1,8 +1,9 @@
 # API Données — couche Données
 
-La base encapsulée derrière son API dédiée. Aucun port publié : seule l'API IA
-la joint, par le réseau privé `data_net`. Elle se connecte à Postgres avec un
-rôle en lecture seule.
+La base encapsulée derrière son API dédiée. Aucun port publié : sur le réseau
+privé `data_net`, seule l'API IA l'interroge ; Prometheus (métriques) et
+Uptime Kuma (sondes) y ont aussi une patte pour l'observer. Elle se connecte à
+Postgres avec un rôle en lecture seule.
 
 ## Endpoints
 

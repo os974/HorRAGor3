@@ -34,13 +34,13 @@ def test_rag_node_premiere_visite_construit_le_prompt(monkeypatch):
     out = nodes.rag_node({"question": "Parle-moi d'Alien"})
 
     assert out["path"] == ["rag"]
-    assert out["is_complete"] is False  # aucun ToolMessage encore
+    assert out["lore"] == ""  # aucun ToolMessage encore
     assert len(out["rag_messages"]) == 3  # system + human + ai
     assert "Chercheur" in fake.last_messages[0].content
 
 
-def test_rag_node_juge_sa_recolte_sur_les_faits(monkeypatch):
-    """Des faits "found": true dans le canal → récolte complète."""
+def test_rag_node_fige_sa_recolte_dans_le_lore(monkeypatch):
+    """Les faits "found": true du canal deviennent le lore (sans jugement)."""
     fake = FakeLLM(AIMessage(content="fouille terminée"))
     monkeypatch.setattr(nodes, "_worker_llm", lambda: fake)
     history = [
@@ -54,23 +54,9 @@ def test_rag_node_juge_sa_recolte_sur_les_faits(monkeypatch):
         {"question": "Parle-moi d'Alien", "rag_messages": history, "path": ["rag"]}
     )
 
-    assert out["is_complete"] is True
     assert "Alien" in out["lore"]
+    assert "is_complete" not in out  # le jugement appartient au routeur
     assert "path" not in out  # déjà visité : pas de doublon
-
-
-def test_rag_node_anecdotes_jamais_complet_localement(monkeypatch):
-    """Question anecdotes → récolte insuffisante même avec des faits."""
-    fake = FakeLLM(AIMessage(content="fouille terminée"))
-    monkeypatch.setattr(nodes, "_worker_llm", lambda: fake)
-    history = [ToolMessage(content='{"found": true, "title": "Weapons"}', tool_call_id="1")]
-
-    out = nodes.rag_node(
-        {"question": "Anecdotes de tournage de Weapons ?", "rag_messages": history, "path": ["rag"]}
-    )
-
-    assert out["is_complete"] is False  # l'Enquêteur devra partir
-    assert "Weapons" in out["lore"]  # mais le lore local est conservé
 
 
 def test_scraper_node_recoit_un_brief_reformule(monkeypatch):

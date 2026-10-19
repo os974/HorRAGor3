@@ -12,13 +12,26 @@ graphe (Chercheur → Enquêteur → Écrivain) — la preuve visuelle du routag
 conditionnel du brief.
 """
 
+import uuid
+
 import httpx
 import streamlit as st
+from loguru import logger
 
 from src.config import settings
 from src.contracts.schemas import ChatRequest, ChatResponse
+from src.logging_conf import setup_logging
 
 st.set_page_config(page_title="HorRAGor3 🕸️", page_icon="🕸️")
+
+
+@st.cache_resource
+def _init_logging() -> None:
+    """Configure Loguru une fois par processus (et non à chaque rerun Streamlit)."""
+    setup_logging()
+
+
+_init_logging()
 
 # Libellés humains des nœuds du graphe (ChatResponse.path).
 _AGENT_BADGES = {
@@ -56,11 +69,27 @@ def _login(username: str, password: str) -> bool:
         timeout=15,
     )
     if resp.status_code != 200:
+        logger.warning("Connexion refusée par l'API (HTTP {})", resp.status_code)
         return False
     tokens = resp.json()
     st.session_state.access_token = tokens["access_token"]
     st.session_state.refresh_token = tokens["refresh_token"]
     return True
+
+
+def _session_id() -> str:
+    """Identifiant de la conversation courante, créé à sa première question.
+
+    Transmis à chaque ``POST /chat`` : il regroupe les traces Langfuse de la
+    conversation et se retrouve dans les logs Loguru de l'API (corrélation).
+
+    Returns:
+        L'identifiant hexadécimal (uuid4) de la conversation.
+    """
+    if "session_id" not in st.session_state:
+        st.session_state.session_id = uuid.uuid4().hex
+        logger.info("Nouvelle conversation [{}]", st.session_state.session_id)
+    return st.session_state.session_id
 
 
 def _refresh_tokens() -> bool:
@@ -102,7 +131,7 @@ def _post_chat(req: ChatRequest) -> httpx.Response:
     )
 
 
-def _send_message(message: str, session_id: str = "default") -> ChatResponse:
+def _send_message(message: str, session_id: str) -> ChatResponse:
     """Envoie la question à ``POST /chat`` (JWT), avec refresh automatique sur 401.
 
     Args:
@@ -178,11 +207,12 @@ with st.sidebar:
                 st.error("Identifiants invalides")
     else:
         if st.button("🚪 Se déconnecter", use_container_width=True):
-            for key in ("access_token", "refresh_token", "messages"):
+            for key in ("access_token", "refresh_token", "messages", "session_id"):
                 st.session_state.pop(key, None)
             st.rerun()
         if st.button("🗑️ Nouvelle conversation", use_container_width=True):
             st.session_state.messages = []
+            st.session_state.pop("session_id", None)
             st.rerun()
     st.markdown("**Exemples :**")
     st.markdown(
@@ -218,7 +248,7 @@ if prompt := st.chat_input("Ose poser ta question sur un film d'horreur..."):
     with st.chat_message("assistant"):
         with st.spinner("Les agents s'affairent dans la crypte..."):
             try:
-                response = _send_message(prompt)
+                response = _send_message(prompt, _session_id())
                 entry = {
                     "role": "assistant",
                     "content": response.answer,
@@ -227,6 +257,7 @@ if prompt := st.chat_input("Ose poser ta question sur un film d'horreur..."):
                     "trace": [step.model_dump() for step in response.trace],
                 }
             except Exception as exc:  # noqa: BLE001 — toute erreur s'affiche à l'utilisateur
+                logger.exception("Échec de POST /chat [{}]", st.session_state.get("session_id"))
                 entry = {
                     "role": "assistant",
                     "content": f"⚠️ Le manoir ne répond pas (API) : {exc}",

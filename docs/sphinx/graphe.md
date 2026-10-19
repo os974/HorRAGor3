@@ -17,7 +17,7 @@ construction de la documentation.
 | `scraper` | **Agent Scraper — l'Enquêteur du web** : déclenché seulement si la récolte locale est insuffisante ou si la question réclame des anecdotes |
 | `scraper_tools` | Exécution des outils de l'Enquêteur (Wikipédia, DuckDuckGo) |
 | `narration` | **Agent de Narration — l'Écrivain gothique** : sans outils, ne reçoit que la synthèse (context trimming) |
-| `should_continue_rag` | Routeur du Chercheur : outils à appeler → `rag_tools` ; sinon délègue à **`should_scrape_or_narrate`**, l'aiguillage du brief (récolte suffisante → `narration`, sinon → `scraper`) |
+| `should_continue_rag` | Routeur du Chercheur : outils à appeler → `rag_tools` ; sinon délègue à **`should_scrape_or_narrate`**, l'aiguillage du brief, qui porte la règle « la récolte suffit-elle ? » (`lore` non vide et question sans demande d'anecdotes → `narration`, sinon → `scraper`) |
 | `should_continue_scraper` | Routeur de l'Enquêteur : outils à appeler → `scraper_tools`, sinon → `narration` |
 
 Les règles d'or du brief sont tenues par construction : un nœud est une
@@ -25,6 +25,19 @@ fonction `(state) -> dict` qui ignore ses voisins ; un routeur lit le `State`
 et ne renvoie qu'une chaîne (la destination), testable sans lancer le graphe ;
 `pipeline.py` est le seul point de vérité de la topologie et se termine par
 `app = workflow.compile()`, importé par l'API.
+
+## Les trois agents
+
+Une page par agent : son rôle, ce qu'il lit et écrit dans le `State`, ses
+outils, et ce que Langfuse mesure de son travail.
+
+```{toctree}
+:maxdepth: 1
+
+agents/rag
+agents/scraper
+agents/narration
+```
 
 ## Le State — la mémoire commune
 

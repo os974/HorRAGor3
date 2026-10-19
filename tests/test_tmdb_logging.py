@@ -62,7 +62,35 @@ def test_setup_logging_intercepte_la_stdlib():
     assert any("ping-stdlib" in line for line in captured)
 
 
+def test_setup_logging_rebranche_les_loggers_uvicorn():
+    """Les logs d'accès d'uvicorn (handlers propres, sans propagation) arrivent à Loguru."""
+    access = logging.getLogger("uvicorn.access")
+    access.addHandler(logging.NullHandler())  # comme le dictConfig d'uvicorn
+    access.propagate = False
+    setup_logging()
+    captured: list[str] = []
+    handler_id = logger.add(lambda message: captured.append(str(message)), level="INFO")
+    try:
+        access.info("GET /health 200")
+    finally:
+        logger.remove(handler_id)
+    assert any("GET /health 200" in line for line in captured)
+
+
 def test_setup_logging_idempotent():
     """Deux appels ne dupliquent pas les sorties (remove avant add)."""
     setup_logging()
     setup_logging()  # ne doit pas lever ni empiler les sinks
+
+
+def test_intercept_handler_attribue_le_log_a_son_vrai_appelant():
+    """L'origine affichée est le module appelant, pas la mécanique de logging."""
+    setup_logging()
+    records: list[dict] = []
+    handler_id = logger.add(lambda message: records.append(message.record), level="WARNING")
+    try:
+        logging.getLogger("horragor.test-origine").warning("ping-origine")
+    finally:
+        logger.remove(handler_id)
+    record = next(r for r in records if r["message"] == "ping-origine")
+    assert record["function"] == "test_intercept_handler_attribue_le_log_a_son_vrai_appelant"
