@@ -1,8 +1,10 @@
-"""Engine SQLAlchemy partagé vers la base (Supabase PostgreSQL). Repris de HorRAGor2.
+"""Engine SQLAlchemy partagé vers la base PostgreSQL + pgvector. Repris de HorRAGor2.
 
-Engine unique mis en cache : SQLAlchemy gère un pool de connexions, on ne le
-recrée pas à chaque requête. ``pool_pre_ping`` revalide la connexion avant
-usage (le pooler Supabase ferme les connexions inactives).
+En cluster : le conteneur ``db`` du réseau privé (seule l'API Données s'y
+connecte). En dev hors cluster : Supabase. Engine unique mis en cache :
+SQLAlchemy gère un pool de connexions, on ne le recrée pas à chaque requête.
+``pool_pre_ping`` revalide la connexion avant usage (un pooler distant peut
+fermer les connexions inactives).
 
 Repli hors-ligne possible : ``DATABASE_URL=sqlite:///../HorRAGor1/data/horragor.db``
 — le schéma est identique, seule la reco pgvector devient indisponible.
